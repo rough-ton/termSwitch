@@ -28,6 +28,7 @@ from .launcher import (TERMINAL_CHOICES, LaunchError, LaunchOptions, find_aws, l
 from .deps import ERROR as DEP_ERROR, WARN as DEP_WARN, summary as dep_summary, worst
 from .depsui import DependencyDialog, DependencyRunner
 from .icons import AUTO_GROUP_ICONS, icon as material_icon, shell_icon
+from .commands_pane import CommandsPane, VerticalTab
 from .terminal_tabs import TerminalTabs
 from .terminal_widget import default_font
 from .status import CHECKING, ERROR, EXPIRED, UNKNOWN, VALID, StatusChecker, StatusResult
@@ -406,11 +407,14 @@ class MainWindow(QMainWindow):
         geometry = self.settings.value("geometry")
         if geometry is not None:
             self.restoreGeometry(geometry)
-        for key, splitter in (("main_splitter", self.splitter),
+        for key, splitter in (("main_splitter_v2", self.splitter),
                               ("left_splitter", self.left_splitter)):
             state = self.settings.value(key)
             if state is not None:
                 splitter.restoreState(state)
+        self.set_commands_visible(self.settings.value("commands_visible", True, type=bool),
+                                  save=False)
+        QTimer.singleShot(200, self.commands.load)
 
         self.reload()
 
@@ -486,14 +490,34 @@ class MainWindow(QMainWindow):
         self.terminals.count_changed.connect(self._on_tab_count)
         self._apply_terminal_settings()
 
+        self.commands = CommandsPane()
+        self.commands.close_requested.connect(lambda: self.set_commands_visible(False))
+        self.commands.insert_requested.connect(self._insert_command)
+        self.commands.open_url_requested.connect(lambda url: self._open_link(QUrl(url)))
+        self.commands_tab = VerticalTab("Commands")
+        self.commands_tab.clicked.connect(lambda: self.set_commands_visible(True))
+        self.terminals.tabs.currentChanged.connect(lambda _i: self._update_command_target())
+        self.terminals.count_changed.connect(lambda _n: self._update_command_target())
+        self.terminals.terminal_state_changed.connect(self._update_command_target)
+
         self.splitter = QSplitter()
         self.splitter.addWidget(self.left_splitter)
         self.splitter.addWidget(self.terminals)
+        self.splitter.addWidget(self.commands)
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
+        self.splitter.setStretchFactor(2, 0)
         self.splitter.setCollapsible(1, False)
-        self.splitter.setSizes([330, 950])
-        self.setCentralWidget(self.splitter)
+        self.splitter.setCollapsible(2, False)
+        self.splitter.setSizes([300, 700, 320])
+
+        central = QWidget()
+        cl = QHBoxLayout(central)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(0)
+        cl.addWidget(self.splitter, 1)
+        cl.addWidget(self.commands_tab)
+        self.setCentralWidget(central)
 
         for key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             sc = QShortcut(QKeySequence(key), self.tree)
@@ -533,8 +557,14 @@ class MainWindow(QMainWindow):
         self.act_focus_tree = action("Focus profiles", lambda: self.tree.setFocus(), None,
                                      "Ctrl+1")
         self.act_focus_term = action("Focus terminal", self._focus_terminal, None, "Ctrl+2")
+        self.act_commands = action("Commands", lambda: self.set_commands_visible(
+            not self.commands.isVisible()), None, "Ctrl+Shift+K")
+        self.act_commands.setCheckable(True)
+        self.act_find_command = action("Find command...", self._find_command, None,
+                                       "Ctrl+Shift+F")
         for a in (self.act_close_tab, self.act_next_tab, self.act_prev_tab,
-                  self.act_focus_tree, self.act_focus_term):
+                  self.act_focus_tree, self.act_focus_term, self.act_commands,
+                  self.act_find_command):
             a.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
             self.addAction(a)
         self.act_new_group = action("New group", lambda: self.new_group(None), None,
@@ -562,6 +592,9 @@ class MainWindow(QMainWindow):
         menu_file.addAction(quit_act)
 
         menu_view = self.menuBar().addMenu("&View")
+        menu_view.addAction(self.act_commands)
+        menu_view.addAction(self.act_find_command)
+        menu_view.addSeparator()
         menu_view.addAction(self.act_close_tab)
         menu_view.addAction(self.act_next_tab)
         menu_view.addAction(self.act_prev_tab)
@@ -947,6 +980,43 @@ class MainWindow(QMainWindow):
         term = self.terminals.current_terminal()
         if term:
             term.setFocus()
+
+    # ---- commands pane ---------------------------------------------------
+
+    def set_commands_visible(self, visible: bool, save: bool = True):
+        if visible and not self.commands.isVisible():
+            self.commands.show()
+            sizes = self.splitter.sizes()
+            if len(sizes) == 3 and sizes[2] < 200:
+                take = 320 - sizes[2]
+                sizes[1] = max(sizes[1] - take, 300)
+                sizes[2] = 320
+                self.splitter.setSizes(sizes)
+        elif not visible:
+            self.commands.hide()
+        self.commands_tab.setVisible(not visible)
+        if hasattr(self, "act_commands"):
+            self.act_commands.setChecked(visible)
+        if save:
+            self.settings.setValue("commands_visible", visible)
+
+    def _find_command(self):
+        self.set_commands_visible(True)
+        self.commands.focus_filter()
+
+    def _update_command_target(self):
+        term = self.terminals.current_terminal()
+        self.commands.set_terminal_available(bool(term and term.is_alive()))
+
+    def _insert_command(self, text: str, run: bool):
+        term = self.terminals.current_terminal()
+        if not term or not term.is_alive():
+            QGuiApplication.clipboard().setText(text.strip())
+            self.statusBar().showMessage(
+                "No terminal tab is open, so the command was copied to the clipboard.", 5000)
+            return
+        term.insert_command(text, run=run)
+        term.setFocus()
 
     def _on_tab_count(self, count: int):
         self.act_close_tab.setEnabled(count > 0)
@@ -1404,7 +1474,8 @@ class MainWindow(QMainWindow):
                 return
         self.terminals.close_all()
         self.settings.setValue("geometry", self.saveGeometry())
-        self.settings.setValue("main_splitter", self.splitter.saveState())
+        self.settings.setValue("main_splitter_v2", self.splitter.saveState())
+        self.settings.setValue("commands_visible", self.commands.isVisible())
         self.settings.setValue("left_splitter", self.left_splitter.saveState())
         self._save_expanded()
         super().closeEvent(event)

@@ -207,8 +207,9 @@ class TerminalWidget(QAbstractScrollArea):
 
     def insert_command(self, command: str, run: bool = False) -> None:
         """Type a command at the prompt; press Enter only when run=True."""
-        safe = sanitize_paste(command.replace("\r", " ").replace("\n", " "),
-                              self.screen.bracketed_paste and not run)
+        # Newlines and control characters are removed, so the text is typed as
+        # plain input (a bracketed paste would make some shells highlight it).
+        safe = sanitize_paste(command.replace("\r", " ").replace("\n", " "), bracketed=False)
         self.send_text(safe + ("\r" if run else ""))
 
     # ---- font and geometry -----------------------------------------------

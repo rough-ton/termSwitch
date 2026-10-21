@@ -33,6 +33,7 @@ class TerminalTabs(QStackedWidget):
 
     open_external_requested = Signal(object)     # Profile
     count_changed = Signal(int)
+    terminal_state_changed = Signal()            # a shell exited or restarted
 
     def __init__(self, placeholder_html: str = "", parent=None):
         super().__init__(parent)
@@ -123,6 +124,7 @@ class TerminalTabs(QStackedWidget):
             return
         self.tabs.setTabIcon(idx, _color_icon(None, exited=True))
         self.tabs.setTabText(idx, f"{info.title} (exited)")
+        self.terminal_state_changed.emit()
 
     # ---- closing ---------------------------------------------------------
 
@@ -190,6 +192,7 @@ class TerminalTabs(QStackedWidget):
             self.tabs.setTabText(idx, info.title)
             self.tabs.setTabIcon(idx, _color_icon(info.options.tab_color))
         term.restart()
+        self.terminal_state_changed.emit()
 
     def _rename(self, idx: int):
         term = self.tabs.widget(idx)
