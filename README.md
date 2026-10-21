@@ -191,6 +191,15 @@ the lookup off in Settings.
 - Only `https://` links are opened, such as the SSO start URL. `file:`, `javascript:` and
   plain `http:` are blocked.
 
+**Reading AWS CLI models (Commands pane)**
+
+- Model files are parsed as JSON data only. Nothing in them is executed.
+- They are only read from inside the resolved AWS CLI install. A symlink pointing outside
+  it is refused.
+- Each model is size-limited (64 MB, also after decompression).
+- Inserted commands are typed with newlines and control characters removed, and never
+  include Enter.
+
 **Writing the config**
 
 - Writes go through `configupdater`, which changes only the affected lines.
@@ -262,6 +271,41 @@ grouped by SSO session or credential type; change it under View > Group untagged
 profiles by. Dropping a profile on an automatic group, or on empty space, removes its
 `x_group`.
 
+## Commands pane
+
+To the right of the terminal tabs is a **Commands** pane listing every AWS CLI command,
+modeled on PowerShell ISE's Commands view.
+
+- **Service:** pick a service, or All. Each entry shows its full name, for example
+  `ec2 (Amazon Elastic Compute Cloud)`.
+- **Name:** filter as you type. `describe-inst` or `s3 cp` both work. Press Enter to
+  jump to the first match.
+- **The list:** alphabetical, with letter headers. Hover a command for its description.
+- **Insert, or double-click:** types `aws <service> <command> ` at the prompt of the
+  active tab. It never presses Enter.
+- **Copy:** copies the command.
+- **Docs:** opens the AWS CLI reference page for the command.
+- **Collapsing:**
+  - The **X** collapses the pane to a thin "Commands" tab on the right edge; click the
+    tab to bring it back.
+  - Ctrl+Shift+K toggles the pane, and Ctrl+Shift+F jumps to the Name filter.
+  - The pane remembers whether it was open, and its width.
+
+The list comes from **the AWS CLI you have installed**, so it always matches your
+version:
+- **Source:** CLI v2 ships the botocore service models inside its install, and termSwitch
+  reads them from there.
+- **Naming:** the CLI's own service and command names are used. `s3api`, `deploy` and
+  `configservice` keep their CLI names, and commands the CLI removes are left out.
+- **Extra commands:** a curated list adds commands that aren't in the models, such as
+  `s3 cp`/`sync`, `sso login`, `configure`, `logs tail`, `eks update-kubeconfig` and
+  `ecr get-login-password`.
+- **Caching:** the index is cached per CLI version, so later launches are instant.
+  **Refresh** rescans, for example after you upgrade the CLI.
+- **Cache location:**
+  - Windows: `%LOCALAPPDATA%\termSwitch\cache`
+  - macOS: `~/Library/Caches/termSwitch`
+
 ## Terminal tabs
 
 | Action | Windows | macOS |
@@ -271,6 +315,8 @@ profiles by. Dropping a profile on an automatic group, or on empty space, remove
 | Close tab | Ctrl+Shift+W | Cmd+W |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | same |
 | Focus profiles / terminal | Ctrl+1 / Ctrl+2 | same |
+| Show / hide Commands | Ctrl+Shift+K | Cmd+Shift+K |
+| Find a command | Ctrl+Shift+F | Cmd+Shift+F |
 | Scroll back | Shift+PgUp / PgDn, mouse wheel | same |
 | Clear scrollback | right-click > Clear scrollback | Cmd+K |
 
@@ -313,7 +359,7 @@ macOS runners.
 2. Commit, then tag and push:
 
    ```bash
-   git tag v0.4.0
+   git tag v0.5.0
    git push origin main --tags
    ```
 
@@ -393,6 +439,9 @@ termswitch/
   terminal_widget.py  terminal view: painting, keys, selection, clipboard
   terminal_core.py screen model (scrollback, alternate screen), key encoding, paste safety
   pty_backend.py   ConPTY (Windows) and POSIX pty processes
+  aws_commands.py  AWS CLI command catalog from the installed CLI's models
+  aws_name_overrides.py  CLI spellings for unusual operation names (tools/gen_name_overrides.py)
+  commands_pane.py Commands pane and its collapsed right-edge tab
   assets/          app icon in SVG, PNG, ICO, ICNS; icons/material/ (MIT)
   icons.py         Material Icon Theme icons for groups, tabs and the toolbar
 tests/
