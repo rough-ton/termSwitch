@@ -103,6 +103,10 @@ class TerminalTabs(QStackedWidget):
         w = self.tabs.currentWidget()
         return w if isinstance(w, TerminalWidget) else None
 
+    def current_info(self) -> TabInfo | None:
+        t = self.current_terminal()
+        return self._infos.get(id(t)) if t else None
+
     def terminals(self) -> list[TerminalWidget]:
         return [self.tabs.widget(i) for i in range(self.tabs.count())]
 

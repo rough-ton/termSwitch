@@ -28,6 +28,7 @@ from .launcher import (TERMINAL_CHOICES, LaunchError, LaunchOptions, find_aws, l
 from .deps import ERROR as DEP_ERROR, WARN as DEP_WARN, summary as dep_summary, worst
 from .depsui import DependencyDialog, DependencyRunner
 from .icons import AUTO_GROUP_ICONS, icon as material_icon, shell_icon
+from .aws_params import is_destructive, needs_confirmation
 from .commands_pane import CommandsPane, VerticalTab
 from .terminal_tabs import TerminalTabs
 from .terminal_widget import default_font
@@ -1006,14 +1007,42 @@ class MainWindow(QMainWindow):
 
     def _update_command_target(self):
         term = self.terminals.current_terminal()
-        self.commands.set_terminal_available(bool(term and term.is_alive()))
+        info = self.terminals.current_info()
+        shell = "powershell" if platform_key() == "win32" else "posix"
+        region = info.profile.region if info and info.profile.region else ""
+        self.commands.set_target(shell, region, bool(term and term.is_alive()))
 
-    def _insert_command(self, text: str, run: bool):
+    def _confirm_run(self, text: str, command, info) -> bool:
+        """Ask before running destructive commands anywhere, and anything that
+        changes state on a production profile."""
+        destructive = is_destructive(command, text)
+        prod = bool(info and self._profile_color(info.profile) == PROD_COLOR)
+        if not needs_confirmation(command, text, prod):
+            return True
+        prof = info.profile if info else None
+        who = prof.name if prof else "this terminal"
+        acct = f" (account {prof.account_id})" if prof and prof.account_id else ""
+        kind = "a destructive command" if destructive else "a command that changes resources"
+        where = " on a production profile" if prod else ""
+        box = QMessageBox(QMessageBox.Icon.Warning, "Confirm command",
+                          f"You are about to run {kind}{where}.", parent=self)
+        box.setInformativeText(f"Profile: {who}{acct}\n\n{text}")
+        run_btn = box.addButton("Run", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        return box.clickedButton() is run_btn
+
+    def _insert_command(self, text: str, run: bool, command=None):
         term = self.terminals.current_terminal()
         if not term or not term.is_alive():
             QGuiApplication.clipboard().setText(text.strip())
             self.statusBar().showMessage(
                 "No terminal tab is open, so the command was copied to the clipboard.", 5000)
+            return
+        if run and command is not None and not self._confirm_run(
+                text, command, self.terminals.current_info()):
+            self.statusBar().showMessage("Command not run.", 3000)
             return
         term.insert_command(text, run=run)
         term.setFocus()
