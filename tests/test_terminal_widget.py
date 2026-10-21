@@ -55,12 +55,14 @@ def test_selection_text(qapp):
     assert t.selected_text() == "line\nsecond"
 
 
-def test_embedded_command_posix(tmp_path):
+def test_embedded_command_posix(monkeypatch):
+    # Runs on every OS: the shell lookup is stubbed so Windows runners pass too.
+    monkeypatch.setattr("termswitch.launcher.user_shell", lambda platform=None: "/bin/zsh")
     prof = Profile(name="dev-admin", props={"sso_session": "corp"})
     argv, env = embedded_command(prof, LaunchOptions(), "linux", "/usr/local/bin/aws")
     assert argv[0] == "/bin/sh" and argv[1] == "-c"
     assert "sso login --profile dev-admin" in argv[2]
-    assert argv[2].rstrip().endswith(" -l")
+    assert argv[2].rstrip().endswith("exec /bin/zsh -l")
     assert env["AWS_PROFILE"] == "dev-admin" and env["TERM"] == "xterm-256color"
     assert "AWS_SECRET_ACCESS_KEY" not in env
 
