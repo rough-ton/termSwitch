@@ -27,6 +27,7 @@ from .launcher import (TERMINAL_CHOICES, LaunchError, LaunchOptions, find_aws, l
                        platform_key)
 from .deps import ERROR as DEP_ERROR, WARN as DEP_WARN, summary as dep_summary, worst
 from .depsui import DependencyDialog, DependencyRunner
+from .icons import AUTO_GROUP_ICONS, icon as material_icon, shell_icon
 from .terminal_tabs import TerminalTabs
 from .terminal_widget import default_font
 from .status import CHECKING, ERROR, EXPIRED, UNKNOWN, VALID, StatusChecker, StatusResult
@@ -80,6 +81,16 @@ KIND_LABELS = {"sso": "IAM Identity Center (SSO)", "role": "Assume role",
 
 def item_key(kind: str, value: str) -> str:
     return f"{kind}:{value}"
+
+
+def auto_group_icon_name(profile: Profile, mode: str) -> str:
+    if mode == "none":
+        return "folder-base"
+    if mode == "account":
+        return "folder-aws" if profile.account_id else "folder-base"
+    if mode == "sso_session" and profile.is_sso:
+        return "folder-aws"
+    return AUTO_GROUP_ICONS[profile.kind]
 
 
 def auto_group_label(profile: Profile, mode: str) -> str:
@@ -508,8 +519,8 @@ class MainWindow(QMainWindow):
             a.triggered.connect(slot)
             return a
 
-        self.act_open = action("Open terminal", lambda: self.open_selected(),
-                               QStyle.StandardPixmap.SP_MediaPlay, "Ctrl+T")
+        self.act_open = action("Open terminal", lambda: self.open_selected(), None, "Ctrl+T")
+        self.act_open.setIcon(shell_icon())
         self.act_open_ext = action("Open in external terminal",
                                    lambda: self.open_selected(invert=None, external=True),
                                    QStyle.StandardPixmap.SP_ComputerIcon, "Ctrl+Shift+T")
@@ -526,14 +537,15 @@ class MainWindow(QMainWindow):
                   self.act_focus_tree, self.act_focus_term):
             a.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
             self.addAction(a)
-        self.act_new_group = action("New group", lambda: self.new_group(None),
-                                    QStyle.StandardPixmap.SP_FileDialogNewFolder, "Ctrl+Shift+N")
-        self.act_check_all = action("Check all", self.check_all,
-                                    QStyle.StandardPixmap.SP_DialogApplyButton, "Ctrl+Shift+R")
+        self.act_new_group = action("New group", lambda: self.new_group(None), None,
+                                    "Ctrl+Shift+N")
+        self.act_new_group.setIcon(material_icon("folder-base"))
+        self.act_check_all = action("Check all", self.check_all, None, "Ctrl+Shift+R")
+        self.act_check_all.setIcon(material_icon("verified"))
         self.act_reload = action("Reload", self.reload,
                                  QStyle.StandardPixmap.SP_BrowserReload, QKeySequence.StandardKey.Refresh)
-        self.act_settings = action("Settings", self.open_settings,
-                                   QStyle.StandardPixmap.SP_FileDialogDetailedView, "Ctrl+,")
+        self.act_settings = action("Settings", self.open_settings, None, "Ctrl+,")
+        self.act_settings.setIcon(material_icon("settings"))
         for a in (self.act_open, self.act_new_group, self.act_check_all, self.act_reload,
                   self.act_settings):
             tb.addAction(a)
@@ -640,7 +652,15 @@ class MainWindow(QMainWindow):
         self._tracking = False
         self.tree.setUpdatesEnabled(False)
         self.tree.clear()
-        folder = self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon)
+        prod_pattern = get_setting(self.settings, "prod_pattern")
+
+        def group_icon(path: str) -> QIcon:
+            try:
+                if prod_pattern and re.search(prod_pattern, leaf_name(path), re.IGNORECASE):
+                    return material_icon("folder-secure")
+            except re.error:
+                pass
+            return material_icon("folder-base")
         group_items: dict[str, QTreeWidgetItem] = {}
         drag_drop = (Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
                      | Qt.ItemFlag.ItemIsDragEnabled | Qt.ItemFlag.ItemIsDropEnabled)
@@ -652,7 +672,7 @@ class MainWindow(QMainWindow):
             parent = group_item(parent_path) if parent_path else self.tree.invisibleRootItem()
             it = QTreeWidgetItem(parent, [leaf_name(path)])
             it.setData(0, ROLE, (KIND_GROUP, path))
-            it.setIcon(0, folder)
+            it.setIcon(0, group_icon(path))
             it.setFlags(drag_drop)
             f = it.font(0)
             f.setBold(True)
@@ -666,10 +686,11 @@ class MainWindow(QMainWindow):
         mode = get_setting(self.settings, "auto_group")
         untagged = [p for p in self.store.profiles.values() if not p.group]
         auto_items: dict[str, QTreeWidgetItem] = {}
-        for label in sorted({auto_group_label(p, mode) for p in untagged}, key=natural_key):
+        auto_icons = {auto_group_label(p, mode): auto_group_icon_name(p, mode) for p in untagged}
+        for label in sorted(auto_icons, key=natural_key):
             it = QTreeWidgetItem(self.tree.invisibleRootItem(), [label])
             it.setData(0, ROLE, (KIND_AUTO, label))
-            it.setIcon(0, folder)
+            it.setIcon(0, material_icon(auto_icons[label]))
             it.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             f = it.font(0)
             f.setItalic(True)
@@ -1367,7 +1388,10 @@ class MainWindow(QMainWindow):
             self, "About termSwitch",
             f"<b>termSwitch</b> {__version__}<br><br>"
             f"Config: {html.escape(str(self.store.config_file))}<br>"
-            f"AWS CLI: {html.escape(find_aws() or 'not found')}")
+            f"AWS CLI: {html.escape(find_aws() or 'not found')}<br><br>"
+            "Icons from the <a href='https://github.com/material-extensions/"
+            "vscode-material-icon-theme'>Material Icon Theme</a> by Philipp Kief and "
+            "Material Extensions, MIT license. See THIRD_PARTY_NOTICES.md.")
 
     def closeEvent(self, event):
         running = self.terminals.running_count()

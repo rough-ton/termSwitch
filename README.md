@@ -363,6 +363,12 @@ pip install pillow
 python tools/build_icons.py
 ```
 
+## Credits
+
+Icons from the [Material Icon Theme](https://github.com/material-extensions/vscode-material-icon-theme)
+by Philipp Kief and Material Extensions, used under the MIT license. See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## Tests
 
 ```bash
@@ -387,7 +393,8 @@ termswitch/
   terminal_widget.py  terminal view: painting, keys, selection, clipboard
   terminal_core.py screen model (scrollback, alternate screen), key encoding, paste safety
   pty_backend.py   ConPTY (Windows) and POSIX pty processes
-  assets/          icon in SVG, PNG, ICO, ICNS
+  assets/          app icon in SVG, PNG, ICO, ICNS; icons/material/ (MIT)
+  icons.py         Material Icon Theme icons for groups, tabs and the toolbar
 tests/
 tools/build_icons.py
 .github/workflows/ ci.yml (tests), release.yml (builds and publishes downloads)

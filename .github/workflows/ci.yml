@@ -9,6 +9,16 @@ permissions:
   contents: read
 
 jobs:
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: No attribution text in commits or files
+        run: python3 tools/check_attribution.py --commits --files
+
   test:
     strategy:
       fail-fast: false

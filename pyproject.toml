@@ -26,7 +26,7 @@ tsw = "termswitch.__main__:main"
 packages = ["termswitch"]
 
 [tool.setuptools.package-data]
-termswitch = ["assets/*"]
+termswitch = ["assets/*", "assets/icons/material/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

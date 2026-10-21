@@ -5,25 +5,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QColor, QGuiApplication, QIcon
 from PySide6.QtWidgets import (QInputDialog, QLabel, QMenu, QMessageBox, QStackedWidget,
                                QTabWidget, QVBoxLayout, QWidget)
 
 from .config_store import Profile
+from .icons import shell_icon
 from .launcher import LaunchError, LaunchOptions, embedded_command, find_aws
 from .terminal_widget import TerminalWidget
 
 
 def _color_icon(color: str | None, exited: bool = False) -> QIcon:
-    pm = QPixmap(24, 24)
-    pm.fill(Qt.GlobalColor.transparent)
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(QColor("#8a8f98" if exited else (color or "#2ea44f")))
-    p.drawEllipse(5, 5, 14, 14)
-    p.end()
-    return QIcon(pm)
+    """Shell icon for a tab, with the profile color as a dot (production red)."""
+    return shell_icon(dot=color, exited=exited)
 
 
 @dataclass
