@@ -341,6 +341,81 @@ def build_command(profile: Profile, opts: LaunchOptions, platform: str | None = 
     return [exe, "-e", "bash", "-c", script], {}
 
 
+# --------------------------------------------------------------------------
+# Embedded terminal tabs
+# --------------------------------------------------------------------------
+
+def user_shell(platform: str | None = None) -> str:
+    """The user's login shell on macOS/Linux, validated to be a real executable."""
+    candidates = []
+    env_shell = os.environ.get("SHELL", "")
+    if env_shell:
+        candidates.append(env_shell)
+    try:
+        import pwd
+        candidates.append(pwd.getpwuid(os.getuid()).pw_shell)
+    except (ImportError, KeyError):
+        pass
+    allowed = None
+    try:
+        with open("/etc/shells", encoding="utf-8") as fh:
+            allowed = {ln.strip() for ln in fh if ln.strip() and not ln.startswith("#")}
+    except OSError:
+        pass
+    for cand in candidates:
+        if (cand and os.path.isabs(cand) and os.path.isfile(cand) and os.access(cand, os.X_OK)
+                and (allowed is None or cand in allowed)):
+            return cand
+    for fallback in ("/bin/zsh", "/bin/bash", "/bin/sh"):
+        if os.path.exists(fallback):
+            return fallback
+    raise LaunchError("No usable shell found.")
+
+
+def posix_init_script(profile: Profile, opts: LaunchOptions, aws: str | None) -> str:
+    """Identity check, SSO login and optional credential export, in POSIX sh."""
+    p = shlex.quote(profile.name)
+    aws_cmd = shlex.quote(aws or "aws")
+    check = f"{aws_cmd} sts get-caller-identity --output table"
+    parts = ['printf \'\\033[36mAWS profile: %s\\033[0m\\n\' "$AWS_PROFILE"']
+    if profile.is_sso and opts.auto_sso_login:
+        parts.append(f"{check} || {{ printf '\\033[33mNo valid SSO token, starting aws sso "
+                     f"login...\\033[0m\\n'; {aws_cmd} sso login --profile {p} && {check}; }}")
+    else:
+        parts.append(check)
+    if opts.export_credentials:
+        parts.append(f"eval \"$({aws_cmd} configure export-credentials --profile {p} "
+                     f"--format env)\" && echo 'Exported temporary credentials.'")
+    return "; ".join(parts)
+
+
+def embedded_command(profile: Profile, opts: LaunchOptions, platform: str | None = None,
+                     aws: str | None = None) -> tuple[list[str], dict[str, str]]:
+    """argv and environment for a shell running inside a termSwitch tab."""
+    problem = profile.problem
+    if problem:
+        raise LaunchError(f"Refusing to open '{profile.name!r}': {problem}")
+    key = platform_key(platform)
+    env = build_env(platform)
+    env["AWS_PROFILE"] = profile.name
+    env["TERM_PROGRAM"] = "termSwitch"
+
+    if key == "win32":
+        shell = _which("pwsh", platform) or system_powershell()
+        script = powershell_script(profile, opts, aws)
+        return [shell, "-NoLogo", "-NoExit", "-EncodedCommand", encode_powershell(script)], env
+
+    env["TERM"] = "xterm-256color"
+    env["COLORTERM"] = "truecolor"
+    if not env.get("LANG") and not env.get("LC_ALL"):
+        env["LANG"] = "en_US.UTF-8"   # apps started from Finder get no locale
+    shell = user_shell(platform)
+    # /bin/sh runs the init (so it works for any login shell, fish included),
+    # then replaces itself with the user's interactive login shell.
+    init = posix_init_script(profile, opts, aws)
+    return ["/bin/sh", "-c", f"{init}; exec {shlex.quote(shell)} -l"], env
+
+
 def launch(profile: Profile, opts: LaunchOptions, platform: str | None = None) -> None:
     aws = find_aws(platform)
     argv, kwargs = build_command(profile, opts, platform, aws)

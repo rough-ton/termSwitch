@@ -1,0 +1,5 @@
+#!/bin/sh
+# Rejects commit messages with tool attribution. Enable with:
+#   git config core.hooksPath .githooks
+exec python3 "$(git rev-parse --show-toplevel)/tools/check_attribution.py" --message "$1" \
+  || exec python "$(git rev-parse --show-toplevel)/tools/check_attribution.py" --message "$1"
