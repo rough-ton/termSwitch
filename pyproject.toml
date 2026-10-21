@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "termswitch"
+version = "0.3.0"
+description = "termSwitch: grouped AWS profiles that open authenticated terminals"
+requires-python = ">=3.10"
+dependencies = ["PySide6-Essentials>=6.6", "configupdater>=3.1"]
+
+[project.gui-scripts]
+termswitch = "termswitch.__main__:main"
+
+[project.scripts]
+# Console entry point, handy for `tsw --check`.
+tsw = "termswitch.__main__:main"
+
+[tool.setuptools]
+packages = ["termswitch"]
+
+[tool.setuptools.package-data]
+termswitch = ["assets/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

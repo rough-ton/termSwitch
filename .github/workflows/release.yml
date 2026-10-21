@@ -1,0 +1,117 @@
+name: Release
+
+# Push a tag like v0.3.0 to build and publish. Run it by hand (Actions >
+# Release > Run workflow) to build the downloads without publishing.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: termSwitch-windows-x64.exe
+          - os: macos-latest
+            artifact: termSwitch-macos-arm64.dmg
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write        # build provenance attestation
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Check the tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          version=$(python -c "import termswitch; print(termswitch.__version__)")
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match termswitch.__version__ ${version}"
+            exit 1
+          fi
+
+      - name: Install pinned dependencies
+        run: python -m pip install --require-hashes -r requirements.lock -r requirements-build.lock
+
+      - name: Build
+        run: pyinstaller --noconfirm --clean termswitch.spec
+
+      - name: Package and smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $out = "dist/${{ matrix.artifact }}"
+          Move-Item dist/termSwitch.exe $out
+          $p = Start-Process -FilePath $out -ArgumentList '--version' -Wait -PassThru -NoNewWindow
+          if ($p.ExitCode -ne 0) { throw "termSwitch --version exited $($p.ExitCode)" }
+          # Informational: the runner has no AWS config, so warnings are expected.
+          Start-Process -FilePath $out -ArgumentList '--check','--offline' -Wait -NoNewWindow
+          Get-Item $out | Select-Object Name, Length
+
+      - name: Package and smoke test (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          app=dist/termSwitch.app
+          "$app/Contents/MacOS/termSwitch" --version
+          "$app/Contents/MacOS/termSwitch" --check --offline || true
+          codesign --verify --deep --strict "$app" || echo "::warning::codesign verification failed"
+          mkdir dmg
+          cp -R "$app" dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname termSwitch -srcfolder dmg -ov -format UDZO "dist/${{ matrix.artifact }}"
+          ls -l "dist/${{ matrix.artifact }}"
+
+      - name: Attest build provenance
+        # Attestations need a public repo (or GitHub Enterprise Cloud for private).
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/${{ matrix.artifact }}
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: out
+        run: |
+          sha256sum termSwitch-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" out/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "termSwitch $GITHUB_REF_NAME" \
+            --generate-notes

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16314f"/>
+      <stop offset="1" stop-color="#0a1422"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#bg)"/>
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="6"/>
+  <!-- prompt -->
+  <polyline points="196,392 316,512 196,632" fill="none" stroke="#ff9f1c" stroke-width="70"
+            stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- switch: one trunk, three tracks -->
+  <g fill="none" stroke="#eef3f8" stroke-width="48" stroke-linecap="round">
+    <path d="M392 512 H520"/>
+    <path d="M520 512 C620 512 620 312 712 312"/>
+    <path d="M520 512 H712"/>
+    <path d="M520 512 C620 512 620 712 712 712"/>
+  </g>
+  <!-- destinations -->
+  <circle cx="790" cy="312" r="70" fill="#2ea44f"/>
+  <circle cx="790" cy="512" r="70" fill="#f2b01e"/>
+  <circle cx="790" cy="712" r="70" fill="#e5484d"/>
+</svg>

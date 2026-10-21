@@ -1,0 +1,343 @@
+# termSwitch
+
+termSwitch is a small desktop app for macOS and Windows. It shows your AWS profiles in a
+tree grouped the way you want, and opens a terminal already set to the profile you
+double-click.
+
+*Flip the switch, not the profile.*
+
+![icon](termswitch/assets/termswitch-128.png)
+
+The icon is a terminal prompt feeding a switch that splits into three tracks. The green,
+amber and red ends match the status dots in the app.
+
+## Download
+
+Grab the latest build from the [Releases page](https://github.com/rough-ton/termSwitch/releases/latest):
+
+| Platform | File |
+| --- | --- |
+| Windows 10/11 (x64) | `termSwitch-windows-x64.exe`. One file, no install, just run it. |
+| macOS 12+ (Apple Silicon) | `termSwitch-macos-arm64.dmg`. Open it and drag termSwitch to Applications. |
+
+Every release includes `SHA256SUMS.txt`. Verify your download before running it:
+
+```powershell
+# Windows
+(Get-FileHash .\termSwitch-windows-x64.exe -Algorithm SHA256).Hash
+```
+
+```bash
+# macOS
+shasum -a 256 termSwitch-macos-arm64.dmg
+```
+
+When the repo is public, each file also has a signed build provenance attestation:
+
+```bash
+gh attestation verify termSwitch-windows-x64.exe --repo rough-ton/termSwitch
+```
+
+The builds are not code-signed yet, so the OS will warn you the first time:
+
+- Windows: SmartScreen shows "Windows protected your PC". Click More info > Run anyway.
+- macOS: Gatekeeper blocks the first launch. Right-click the app > Open, or run:
+
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/termSwitch.app
+  ```
+
+The Windows exe unpacks itself to a temp folder on launch, so it takes a second or two
+to start.
+
+You still need the AWS CLI v2 installed. Everything else is bundled.
+
+## Features
+
+- **Groups stored in `~/.aws/config`.** They live in an `x_group` key on each profile, so
+  they follow the file to any machine. Drag and drop rewrites only the lines it needs to,
+  and comments and formatting are kept.
+- **Credential status.** Green, orange or red dots come from
+  `aws sts get-caller-identity`, which runs in the background.
+- **SSO login.** When an SSO profile needs a login, `aws sso login` runs automatically in
+  the new terminal. You can also log in from the app. One login refreshes every profile
+  on that SSO session.
+- **Production safeguards.** Profiles that match a pattern (`prod` by default) show in red
+  and get a red tab color. By default, termSwitch asks before opening one.
+- **Dependency and security check.** This runs at every launch. It is described below.
+
+## Requirements
+
+- Python 3.11 or newer. 3.10 works, but it reached end of life in October 2026.
+- AWS CLI v2.9 or newer.
+- Windows: Windows Terminal is recommended; without it, termSwitch opens a PowerShell
+  console. It uses PowerShell 7 if installed, otherwise Windows PowerShell 5.1.
+- macOS: iTerm2 or Terminal.app.
+
+## Run from source
+
+Install from `requirements.lock`, which pins every package to an exact version and
+SHA-256 hash, so pip refuses anything that has been tampered with.
+
+macOS:
+
+```bash
+cd termswitch
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --require-hashes -r requirements.lock
+python -m termswitch
+```
+
+Windows (PowerShell):
+
+```powershell
+cd termswitch
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --require-hashes -r requirements.lock
+python -m termswitch
+```
+
+`requirements.txt` has loose version ranges if you would rather take the newest
+releases. Run `pip install .` to get a `termswitch` command, plus `tsw` for the CLI.
+
+To try it without touching your real config, point it at a different file:
+
+```bash
+AWS_CONFIG_FILE=~/.aws/config.dummy python -m termswitch
+```
+
+In PowerShell: `$env:AWS_CONFIG_FILE = "$HOME\.aws\config.dummy"; python -m termswitch`.
+
+## Dependency check
+
+The check runs in the background at every launch. The status bar shows the result;
+click it, or use Help > Check dependencies, to see the full report. The report window
+opens on its own when something fails, or when there is a warning (you can turn off
+the warning case).
+
+| Check | Error | Warning |
+| --- | --- | --- |
+| Python | Older than 3.10 | Past end of life |
+| PySide6-Essentials, shiboken6, configupdater | Missing or below the minimum | A minor or major version behind PyPI |
+| AWS CLI | Missing, v1, or older than 2.9 | A minor version behind the latest v2 release |
+| Terminal | No usable terminal (macOS: `osascript` missing) | Windows Terminal not installed |
+| AWS config | Does not parse | Missing; writable by other users; owned by someone else; profile names with control characters |
+| AWS credentials | | Readable or writable by other users |
+| Environment | | Running as admin/root; relative entries in PATH |
+
+Being a patch release behind is reported as info only, because the AWS CLI ships patch
+releases almost daily. Every finding includes a fix command, and "Copy fix commands"
+puts them all on the clipboard.
+
+The same check runs from the command line and exits 1 on errors:
+
+```bash
+python -m termswitch --check            # includes latest-version lookups (or: tsw --check)
+python -m termswitch --check --offline  # minimums only, no network
+```
+
+The latest-version lookup makes HTTPS requests to `pypi.org/pypi/<package>/json`,
+the AWS CLI v2 changelog on `raw.githubusercontent.com`, and the latest termSwitch release on `api.github.com`. Certificates are verified,
+responses are size-capped, and nothing is sent except a User-Agent string. You can turn
+the lookup off in Settings.
+
+## Security model
+
+**Credentials**
+
+- termSwitch never holds a secret in memory. When it reads the config and credentials
+  files, it replaces secret keys and session tokens with `<set>`, and access key IDs
+  with `AKIA...1234`.
+- It never writes to `~/.aws/credentials`.
+- It never handles credentials itself. Terminals get `AWS_PROFILE`, and the AWS CLI
+  resolves credentials from there.
+- It removes `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`,
+  `AWS_PROFILE` and related variables from every process it starts. A stray key in your
+  environment can never override the profile you picked.
+- Exporting credentials into the shell is off by default. When on, it uses
+  `aws configure export-credentials`; those credentials expire and do not refresh.
+
+**Starting programs**
+
+- Executables are resolved to absolute paths. PATH lookups skip relative entries and the
+  current directory, so a planted `aws` or `wt` in the working directory is never picked
+  up.
+- On Windows, only `.exe` files are matched. `.cmd` and `.bat` shims are refused because
+  `cmd.exe` re-parses their arguments.
+- System tools come from fixed locations: `/usr/bin/osascript`, `/usr/bin/open`,
+  `%SystemRoot%\System32\...\powershell.exe` and `notepad.exe`.
+- Nothing runs through a shell string. Every process gets an argument list.
+  - Windows init scripts are passed with `-EncodedCommand`.
+  - macOS commands are quoted with `shlex.quote` and passed to AppleScript as arguments,
+    not spliced into the script.
+- Profile names containing control characters are refused. Those characters could
+  otherwise inject terminal escape sequences through the window title.
+- Tab colors must be `#RRGGBB`.
+- Only `https://` links are opened, such as the SSO start URL. `file:`, `javascript:` and
+  plain `http:` are blocked.
+
+**Writing the config**
+
+- Writes go through `configupdater`, which changes only the affected lines.
+- The new text is parsed before it replaces anything, then swapped in atomically: a temp
+  file created with mode 0600 in the same directory, then `os.replace`.
+- termSwitch refuses to write to anything that is not a regular file, or, on macOS, a
+  file owned by another user.
+- A symlinked config (dotfiles repo) is written through to its target, so the link
+  survives.
+- The first write of each session saves a mode-0600
+  `config.termswitch-YYYYMMDD-HHMMSS.bak`. The newest 5 are kept.
+- Outside changes, such as `aws configure sso` or an editor, are picked up before each
+  write, so they are not overwritten.
+
+**Supply chain**
+
+- The only dependencies are `PySide6-Essentials` (not the full PySide6, which adds Qt
+  WebEngine and other large modules) and `configupdater`.
+- `requirements.lock`, `requirements-build.lock` and `requirements-dev.lock` pin exact
+  versions with hashes for every platform. CI and release builds install only from
+  them, with `--require-hashes`. Regenerate after editing a `.in` file:
+
+  ```bash
+  pip install uv
+  for f in requirements requirements-build requirements-dev; do
+    uv pip compile --universal --generate-hashes --python-version 3.12 \
+      "$f.in" -o "$f.lock"
+  done
+  ```
+
+- GitHub Actions are pinned to full commit SHAs. Dependabot opens PRs when they update.
+- Workflows run with read-only tokens. Only the publish job can write, and only to
+  create the release.
+
+- To audit the installed packages: `pip install pip-audit && pip-audit -r requirements.lock`.
+
+**What it does not protect against.** Anyone who can write your `~/.aws/config` can
+already make the AWS CLI run arbitrary commands, through `credential_process`. That is
+why the dependency check warns when the file is writable by other users.
+
+## How groups are stored
+
+```ini
+[profile acme-prod-admin]
+sso_session = acme
+sso_account_id = 111111111111
+sso_role_name = AdministratorAccess
+region = us-west-2
+x_group = Acme/Prod
+x_color = #c0392b
+```
+
+Groups with no profiles yet are kept here so they survive a reload:
+
+```ini
+[x-termswitch]
+groups = Acme/Sandbox
+```
+
+Botocore, the AWS CLI and the SDKs ignore keys and sections they do not recognize.
+Profiles without `x_group` appear in italic automatic groups. By default those are
+grouped by SSO session or credential type; change it under View > Group untagged
+profiles by. Dropping a profile on an automatic group, or on empty space, removes its
+`x_group`.
+
+## Using it
+
+| Action | How |
+| --- | --- |
+| Open terminal | Double-click, Enter, Ctrl+T, or right-click (single-click is an option) |
+| Open several | Multi-select then Enter, or right-click a group > Open all |
+| Move | Drag profiles or groups onto a group |
+| New group | Toolbar or Ctrl+Shift+N (`A/B` makes nested groups) |
+| Rename / delete group | F2 / right-click > Delete (contents move up one level) |
+| Status | Check all (Ctrl+Shift+R), or right-click |
+| SSO login | Button or right-click (opens your browser) |
+| Tab color | Right-click a profile > Set tab color |
+
+## Releases and building
+
+Releases are built by GitHub Actions (`.github/workflows/release.yml`) on Windows and
+macOS runners.
+
+1. Bump `__version__` in `termswitch/__init__.py` and `version` in `pyproject.toml`.
+2. Commit, then tag and push:
+
+   ```bash
+   git tag v0.3.0
+   git push origin main --tags
+   ```
+
+The workflow then:
+
+- checks that the tag matches `__version__`
+- installs from the hash-pinned locks
+- builds with PyInstaller
+- smoke-tests the binary
+- packs the macOS app into a `.dmg`
+- attests provenance (public repos only)
+- publishes a GitHub release with the downloads and `SHA256SUMS.txt`
+
+To build the downloads without publishing, run it by hand from the Actions tab
+(Release > Run workflow). The files appear as run artifacts. With the GitHub CLI:
+
+```bash
+gh workflow run release.yml
+```
+
+To build locally on the platform you are on:
+
+```bash
+python -m pip install --require-hashes -r requirements.lock -r requirements-build.lock
+pyinstaller --noconfirm --clean termswitch.spec
+```
+
+This produces `dist/termSwitch.exe` on Windows and `dist/termSwitch.app` on macOS.
+
+The `.spec` file builds one self-contained file on Windows. macOS apps must be bundles,
+and PyInstaller no longer supports one-file `.app` builds, so on macOS the single
+download is a `.dmg`.
+
+The `.app` includes the Automation usage string shown in the "termSwitch wants to
+control Terminal" prompt. UPX compression is off because antivirus tools often flag it.
+
+To sign builds later:
+
+- macOS: set `CODESIGN_IDENTITY` to your Developer ID before running PyInstaller, then
+  notarize with `notarytool`.
+- Windows: sign with `signtool` or Azure Trusted Signing.
+
+To regenerate the icons after editing `termswitch/assets/termswitch.svg`:
+
+```bash
+pip install pillow
+python tools/build_icons.py
+```
+
+## Tests
+
+```bash
+python -m pip install --require-hashes -r requirements.lock -r requirements-dev.lock
+python -m pytest -q
+```
+
+CI runs them on Windows, macOS and Linux with Python 3.12 and 3.13.
+
+## Layout
+
+```
+termswitch/
+  config_store.py  read profiles, write groups back safely
+  launcher.py      safe executable lookup and terminal commands
+  status.py        background sts checks and SSO logins
+  deps.py          dependency and security checks (--check)
+  depsui.py        dependency report window
+  icon.py          app icon, Windows taskbar identity
+  ui.py            main window, drag-and-drop tree, settings
+  assets/          icon in SVG, PNG, ICO, ICNS
+tests/
+tools/build_icons.py
+.github/workflows/ ci.yml (tests), release.yml (builds and publishes downloads)
+termswitch.spec    PyInstaller build
+```
