@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "termswitch"
-version = "0.6.0"
+dynamic = ["version"]
 description = "termSwitch: grouped AWS profiles that open authenticated terminals"
 requires-python = ">=3.10"
 dependencies = [
@@ -24,6 +24,9 @@ tsw = "termswitch.__main__:main"
 
 [tool.setuptools]
 packages = ["termswitch"]
+
+[tool.setuptools.dynamic]
+version = {attr = "termswitch.BASE_VERSION"}
 
 [tool.setuptools.package-data]
 termswitch = ["assets/*", "assets/icons/material/*"]
