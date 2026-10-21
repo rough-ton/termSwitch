@@ -281,10 +281,50 @@ modeled on PowerShell ISE's Commands view.
 - **Name:** filter as you type. `describe-inst` or `s3 cp` both work. Press Enter to
   jump to the first match.
 - **The list:** alphabetical, with letter headers. Hover a command for its description.
-- **Insert, or double-click:** types `aws <service> <command> ` at the prompt of the
-  active tab. It never presses Enter.
-- **Copy:** copies the command.
-- **Docs:** opens the AWS CLI reference page for the command.
+- **Double-click:** inserts the bare `aws <service> <command> ` at the prompt.
+
+**Parameter form.** Selecting a command shows a form built from its service model,
+like ISE's Show-Command panel:
+
+- **Required:** marked with `*` and listed first. Run and Insert stay disabled until
+  they are filled in.
+- **Optional:** collapsed when there are many, with a filter box. Each option shows the
+  model's description as a tooltip.
+- **Field types:**
+  - drop-downs for enum values
+  - whole-number fields for integers
+  - on/off/not-set choices for flags. The CLI's renamed negations are used, for example
+    `--no-reboot` / `--reboot`.
+  - space-separated lists
+  - a JSON or shorthand editor for nested options, with an **Example** button
+  - `fileb://` hints for binary input
+- **Common:**
+  - `--region` (shows the profile's region), `--output`, `--query`
+  - `--dry-run`, where the operation supports it
+  - pagination options for paginated commands: `--no-paginate`, `--max-items`,
+    `--page-size`, `--starting-token`
+  - free-form extra arguments
+- **Output file:** commands that write their result to a file, such as
+  `s3api get-object` and `lambda invoke`, ask for an output file.
+- **Live preview:** the **Command** box shows exactly what will be typed, quoted for the
+  tab's shell (PowerShell on Windows, POSIX on macOS).
+  - In PowerShell, values containing double quotes (such as JSON) are passed as
+    `file://` references to private temp files, which are removed when termSwitch
+    exits. PowerShell 5.1 and 7 hand embedded quotes to native programs differently, so
+    this is the only form that works in both.
+- **Buttons:**
+  - **Run** types the command and presses Enter.
+  - **Insert** types it without pressing Enter.
+  - **Copy** copies it.
+  - **Docs** opens the AWS CLI reference page.
+- **Safety:**
+  - Run always asks first for destructive commands: `delete-*`, `terminate-*`,
+    `remove-*`, `deregister-*`, `disable-*`, `revoke-*`, `detach-*`, `purge-*`,
+    `s3 rm/rb/mv`, and `s3 sync --delete`.
+  - On a production profile, Run also asks before any command that changes something.
+  - The prompt shows the profile, the account and the exact command, and Cancel is the
+    default.
+  - Insert never runs anything.
 - **Collapsing:**
   - The **X** collapses the pane to a thin "Commands" tab on the right edge; click the
     tab to bring it back.
@@ -359,7 +399,7 @@ macOS runners.
 2. Commit, then tag and push:
 
    ```bash
-   git tag v0.5.0
+   git tag v0.6.0
    git push origin main --tags
    ```
 
@@ -442,6 +482,9 @@ termswitch/
   aws_commands.py  AWS CLI command catalog from the installed CLI's models
   aws_name_overrides.py  CLI spellings for unusual operation names (tools/gen_name_overrides.py)
   commands_pane.py Commands pane and its collapsed right-edge tab
+  aws_params.py    parameters from the model, command-line rendering and quoting, run safety
+  aws_arg_renames.py  CLI argument renames (tools/gen_arg_renames.py)
+  param_form.py    the parameter form
   assets/          app icon in SVG, PNG, ICO, ICNS; icons/material/ (MIT)
   icons.py         Material Icon Theme icons for groups, tabs and the toolbar
 tests/

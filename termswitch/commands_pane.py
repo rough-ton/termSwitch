@@ -8,10 +8,12 @@ from PySide6.QtCore import (QAbstractListModel, QModelIndex, QObject, QRunnable,
                             QThreadPool, Qt, QTimer, Signal)
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPalette
 from PySide6.QtWidgets import (QAbstractButton, QComboBox, QFormLayout, QHBoxLayout, QLabel,
-                               QLineEdit, QListView, QPushButton, QSizePolicy, QToolButton,
-                               QVBoxLayout, QWidget)
+                               QLineEdit, QListView, QPushButton, QSizePolicy, QSplitter,
+                               QToolButton, QVBoxLayout, QWidget)
 
 from .aws_commands import Catalog, Command, load_catalog
+from .aws_params import load_spec
+from .param_form import ParameterForm
 
 DOCS_URL = "https://awscli.amazonaws.com/v2/documentation/api/latest/reference/{svc}/{op}.html"
 ALL = "__all__"
@@ -106,9 +108,9 @@ class CommandListModel(QAbstractListModel):
 
 class CommandsPane(QWidget):
     close_requested = Signal()
-    insert_requested = Signal(str, bool)      # command text, run
+    insert_requested = Signal(str, bool, object)   # command line, run, Command
     open_url_requested = Signal(str)
-    command_selected = Signal(object)         # Command or None (used by #4's form)
+    command_selected = Signal(object)              # Command or None
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -171,38 +173,39 @@ class CommandsPane(QWidget):
         self.status.setWordWrap(True)
         self.status.setStyleSheet("color: #8a8f98;")
 
-        # Selected command summary and actions. The parameter form (#4) goes here.
-        self.detail = QLabel()
-        self.detail.setWordWrap(True)
-        self.detail.setTextFormat(Qt.TextFormat.RichText)
-        self.detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.btn_insert = QPushButton("Insert")
-        self.btn_insert.setToolTip("Type the command at the prompt of the active tab "
-                                   "(does not press Enter)")
-        self.btn_insert.clicked.connect(lambda: self._emit_insert(False))
-        self.btn_copy = QPushButton("Copy")
-        self.btn_copy.clicked.connect(self._copy)
-        self.btn_docs = QPushButton("Docs")
-        self.btn_docs.setToolTip("Open the AWS CLI reference page for this command")
-        self.btn_docs.clicked.connect(self._docs)
-        actions = QHBoxLayout()
-        actions.addWidget(self.btn_insert)
-        actions.addWidget(self.btn_copy)
-        actions.addStretch(1)
-        actions.addWidget(self.btn_docs)
+        # Parameter form for the selected command (Show-Command style).
+        self.form = ParameterForm()
+        self.form.insert_requested.connect(self.insert_requested)
+        self.form.copy_requested.connect(lambda text: QGuiApplication.clipboard().setText(text))
+        self.form.docs_requested.connect(self._docs_for)
+        self.btn_run = self.form.btn_run
+        self.btn_insert = self.form.btn_insert
+        self.btn_copy = self.form.btn_copy
+        self.btn_docs = self.form.btn_docs
+
+        top = QWidget()
+        tl = QVBoxLayout(top)
+        tl.setContentsMargins(0, 0, 0, 0)
+        tl.setSpacing(4)
+        tl.addLayout(form)
+        tl.addWidget(self.list, 1)
+        status_box = QHBoxLayout()
+        status_box.setContentsMargins(8, 0, 8, 0)
+        status_box.addWidget(self.status)
+        tl.addLayout(status_box)
+
+        self.split = QSplitter(Qt.Orientation.Vertical)
+        self.split.addWidget(top)
+        self.split.addWidget(self.form)
+        self.split.setStretchFactor(0, 2)
+        self.split.setStretchFactor(1, 3)
+        self.split.setChildrenCollapsible(False)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 6)
         lay.setSpacing(4)
         lay.addWidget(header)
-        lay.addLayout(form)
-        lay.addWidget(self.list, 1)
-        bottom = QVBoxLayout()
-        bottom.setContentsMargins(8, 0, 8, 0)
-        bottom.addWidget(self.status)
-        bottom.addWidget(self.detail)
-        bottom.addLayout(actions)
-        lay.addLayout(bottom)
+        lay.addWidget(self.split, 1)
 
         self._signals = _LoaderSignals()
         self._signals.progress.connect(self._on_progress)
@@ -276,40 +279,27 @@ class CommandsPane(QWidget):
 
     def _on_current(self, index):
         cmd = self.model.command_at(index.row()) if index.isValid() else None
-        if cmd:
-            doc = cmd.doc or "No description available."
-            self.detail.setText(f"<b><code>{cmd.cli}</code></b><br>{_esc(doc)}")
-        else:
-            self.detail.setText("<span style='color:#8a8f98'>Select a command. "
-                                "Double-click to insert it at the prompt.</span>")
-        self.btn_copy.setEnabled(bool(cmd))
-        self.btn_docs.setEnabled(bool(cmd))
-        self.btn_insert.setEnabled(bool(cmd) and self._terminal_available)
+        spec = None
+        if cmd and self.catalog:
+            svc = self.catalog.services.get(cmd.service)
+            spec = load_spec(cmd, svc.model_dir if svc else "", self.catalog.data_dir)
+        self.form.set_spec(spec)
         self.command_selected.emit(cmd)
 
+    def set_target(self, shell: str, region_hint: str, terminal_available: bool):
+        self.form.set_target(shell, region_hint, terminal_available)
+
     def set_terminal_available(self, available: bool):
-        self._terminal_available = available
-        self.btn_insert.setEnabled(available and self.selected_command() is not None)
+        self.form.set_target(self.form.shell, self.form.region_hint, available)
 
     def _insert_index(self, index):
+        """Double-click: insert the bare command, ready for options."""
         cmd = self.model.command_at(index.row())
         if cmd:
-            self.insert_requested.emit(cmd.cli + " ", False)
+            self.insert_requested.emit(cmd.cli + " ", False, cmd)
 
-    def _emit_insert(self, run: bool):
-        cmd = self.selected_command()
-        if cmd:
-            self.insert_requested.emit(cmd.cli + ("" if run else " "), run)
-
-    def _copy(self):
-        cmd = self.selected_command()
-        if cmd:
-            QGuiApplication.clipboard().setText(cmd.cli)
-
-    def _docs(self):
-        cmd = self.selected_command()
-        if cmd:
-            self.open_url_requested.emit(DOCS_URL.format(svc=cmd.service, op=cmd.name))
+    def _docs_for(self, cmd: Command):
+        self.open_url_requested.emit(DOCS_URL.format(svc=cmd.service, op=cmd.name))
 
     def focus_filter(self):
         self.name.setFocus()

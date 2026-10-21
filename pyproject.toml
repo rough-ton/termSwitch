@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "termswitch"
-version = "0.5.0"
+version = "0.6.0"
 description = "termSwitch: grouped AWS profiles that open authenticated terminals"
 requires-python = ">=3.10"
 dependencies = [
