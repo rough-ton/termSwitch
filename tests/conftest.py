@@ -23,3 +23,15 @@ def pump(app, seconds: float, until=None):
             return True
         time.sleep(0.01)
     return bool(until and until())
+
+
+def pytest_runtest_logreport(report):
+    """In GitHub Actions, surface each failure as an annotation on the run."""
+    if not os.environ.get("GITHUB_ACTIONS") or not report.failed:
+        return
+    path, line, _ = report.location
+    detail = str(report.longrepr).strip().splitlines()
+    tail = " | ".join(detail[-6:])[:900]
+    msg = f"{report.nodeid} ({report.when}): {tail}"
+    msg = msg.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    print(f"\n::error file=tests/{os.path.basename(path)},line={(line or 0) + 1}::{msg}")
