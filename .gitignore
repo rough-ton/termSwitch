@@ -7,3 +7,4 @@ dist/
 dmg/
 *.egg-info/
 .DS_Store
+termswitch/_version.py

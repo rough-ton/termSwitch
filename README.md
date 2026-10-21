@@ -13,13 +13,8 @@ amber and red ends match the status dots in the app.
 
 ## Download
 
-Grab a build from the [Releases page](https://github.com/rough-ton/termSwitch/releases):
-
-- **Versioned releases** (`v0.6.0`, ...) are the stable downloads.
-- **latest** is a pre-release rebuilt automatically from every merge to `main`, for
-  trying new features before they get a version.
-
-Each release has:
+Grab the newest build from the [Releases page](https://github.com/rough-ton/termSwitch/releases/latest).
+Every merge to `main` publishes a new versioned release automatically. Each release has:
 
 | Platform | File |
 | --- | --- |
@@ -401,31 +396,26 @@ Quitting termSwitch with terminals open asks first, then ends them.
 Releases are built by GitHub Actions (`.github/workflows/release.yml`) on Windows and
 macOS runners.
 
-**Every merge to `main`** rebuilds the downloads and replaces the `latest`
-pre-release. Its title shows the version and commit, for example
-"termSwitch 0.6.0 (latest main build, 1a2b3c4)".
-- It is never marked as the latest stable release.
-- If a newer merge arrives while a build is running, the older build is cancelled.
+**Every merge to `main` publishes a new versioned release.** After the Windows and macOS
+builds pass their smoke tests, the workflow:
 
-**For a versioned release:**
+- creates tag `vX.Y.Z` on the merged commit
+- publishes the release with the `.exe`, `.dmg` and `SHA256SUMS.txt`, plus notes listing
+  the merged PRs
+- marks it as the latest release
+- attests build provenance (public repos only)
 
-1. Bump `__version__` in `termswitch/__init__.py` and `version` in `pyproject.toml`.
-2. Commit, then tag and push:
+How the version is chosen:
 
-   ```bash
-   git tag v0.6.0
-   git push origin main --tags
-   ```
-
-The workflow then:
-
-- checks that the tag matches `__version__`
-- installs from the hash-pinned locks
-- builds with PyInstaller
-- smoke-tests the binary
-- packs the macOS app into a `.dmg`
-- attests provenance (public repos only)
-- publishes a GitHub release with the downloads and `SHA256SUMS.txt`
+- `BASE_VERSION` in `termswitch/__init__.py` sets `MAJOR.MINOR`. Raise it yourself when a
+  release adds features, for example `0.6.0` to `0.7.0`.
+- The patch number is automatic: one more than the highest `vMAJOR.MINOR.*` tag
+  (`tools/next_version.py`). The first merge after a bump releases `vMAJOR.MINOR.0`.
+- The release build stamps the exact version into the app (`termswitch/_version.py`,
+  not committed), so About, `--version` and the in-app update check match the release.
+  Source checkouts report `BASE_VERSION`.
+- Releases run one at a time, so two quick merges never get the same number.
+- Don't push `v*` tags by hand. The workflow creates them.
 
 To build the downloads without publishing, run it by hand from the Actions tab
 (Release > Run workflow). The files appear as run artifacts. With the GitHub CLI:
