@@ -68,4 +68,4 @@ def test_powershell_target_notes_temp_files(qapp, model_dir):
     got = []
     form.insert_requested.connect(lambda text, run, cmd: got.append(text))
     form.btn_insert.click()
-    assert "--filters file://" in got[0]
+    assert "--filters file://" in got[0] or "--filters 'file://" in got[0]

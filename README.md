@@ -13,7 +13,13 @@ amber and red ends match the status dots in the app.
 
 ## Download
 
-Grab the latest build from the [Releases page](https://github.com/rough-ton/termSwitch/releases/latest):
+Grab a build from the [Releases page](https://github.com/rough-ton/termSwitch/releases):
+
+- **Versioned releases** (`v0.6.0`, ...) are the stable downloads.
+- **latest** is a pre-release rebuilt automatically from every merge to `main`, for
+  trying new features before they get a version.
+
+Each release has:
 
 | Platform | File |
 | --- | --- |
@@ -394,6 +400,14 @@ Quitting termSwitch with terminals open asks first, then ends them.
 
 Releases are built by GitHub Actions (`.github/workflows/release.yml`) on Windows and
 macOS runners.
+
+**Every merge to `main`** rebuilds the downloads and replaces the `latest`
+pre-release. Its title shows the version and commit, for example
+"termSwitch 0.6.0 (latest main build, 1a2b3c4)".
+- It is never marked as the latest stable release.
+- If a newer merge arrives while a build is running, the older build is cancelled.
+
+**For a versioned release:**
 
 1. Bump `__version__` in `termswitch/__init__.py` and `version` in `pyproject.toml`.
 2. Commit, then tag and push:

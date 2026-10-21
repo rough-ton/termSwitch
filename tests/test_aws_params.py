@@ -108,7 +108,10 @@ def test_render_powershell_uses_files_for_double_quotes(model_dir):
     preview = render(s, vals, Common(query="a[?b=='c']"), "powershell", use_files=False)
     assert "--query 'a[?b==''c'']'" in preview
     line = render(s, vals, Common(), "powershell", use_files=True)
-    ref = line.split("--filters ", 1)[1].split()[0]
+    rest = line.split("--filters ", 1)[1]
+    # The reference is quoted when the temp path has characters such as spaces
+    # or '~' (Windows short names), and bare otherwise.
+    ref = rest[1:rest.index("'", 1)] if rest.startswith("'") else rest.split()[0]
     assert ref.startswith("file://")
     path = ref[len("file://"):]
     assert json.loads(open(path, encoding="utf-8").read()) == [{"Name": "x"}]
@@ -123,6 +126,8 @@ def test_powershell_quoting():
     assert quote_powershell("it's", True) == "'it''s'"
     assert quote_powershell("a,b", True) == "'a,b'"            # a bare comma makes an array
     assert quote_powershell("$env:X", True) == "'$env:X'"
+    assert (quote_powershell("file://C:/Users/Mike Roughton/x.json", True)
+            == "'file://C:/Users/Mike Roughton/x.json'")
 
 
 def test_booleans(model_dir):
