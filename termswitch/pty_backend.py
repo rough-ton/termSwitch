@@ -91,12 +91,24 @@ class PtyProcess:
     # ---- lifecycle -------------------------------------------------------
 
     def is_alive(self) -> bool:
-        return not self._closed.is_set() and self._impl.is_alive()
+        if self._closed.is_set():
+            return False
+        try:
+            return self._impl.is_alive()
+        except Exception:
+            # The reader thread may reap the child at the same moment
+            # (waitpid race); either way the process is gone.
+            return False
 
     def has_foreground_job(self) -> bool:
         """True when something other than the shell owns the terminal (a
         running command). Only detectable on POSIX; Windows reports alive."""
-        return self._impl.has_foreground_job()
+        if self._closed.is_set():
+            return False
+        try:
+            return self._impl.has_foreground_job()
+        except Exception:
+            return False
 
     def terminate(self) -> None:
         if self._closed.is_set():

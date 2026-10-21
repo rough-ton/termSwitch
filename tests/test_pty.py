@@ -64,3 +64,18 @@ def test_terminate():
     p.terminate()
     assert done.wait(10)
     assert not p.is_alive()
+
+
+def test_is_alive_safe_while_child_exits():
+    """is_alive() must never raise while the reader thread reaps the child."""
+    import time
+    for _ in range(20):
+        done = threading.Event()
+        p = PtyProcess(_shell_cmd("exit 0", "exit /b 0"), dict(__import__("os").environ),
+                       None, 80, 24, lambda d: None, lambda c: done.set())
+        end = time.time() + 5
+        while not done.is_set() and time.time() < end:
+            p.is_alive()
+            p.has_foreground_job()
+        assert done.wait(5)
+        assert p.is_alive() is False
