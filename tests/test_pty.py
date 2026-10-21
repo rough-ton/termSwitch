@@ -1,0 +1,66 @@
+import sys
+import threading
+
+import pytest
+
+from termswitch.pty_backend import IS_WINDOWS, PtyError, PtyProcess
+
+
+def _shell_cmd(script_posix: str, script_win: str):
+    if IS_WINDOWS:
+        import os
+        cmd = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "cmd.exe")
+        return [cmd, "/d", "/c", script_win]
+    return ["/bin/sh", "-c", script_posix]
+
+
+def run(argv, write=None, cols=100, rows=30, timeout=15, resize=None):
+    out, done, codes = [], threading.Event(), []
+    p = PtyProcess(argv, dict(__import__("os").environ), None, cols, rows,
+                   on_data=out.append, on_exit=lambda c: (codes.append(c), done.set()))
+    if resize:
+        import time
+        time.sleep(0.3)
+        p.resize(*resize)
+    if write:
+        import time
+        time.sleep(0.5)
+        p.write(write)
+    assert done.wait(timeout), "process did not exit"
+    return "".join(out), codes[0], p
+
+
+def test_spawn_output_and_exit_code():
+    out, code, p = run(_shell_cmd("echo hello-pty; exit 3", "echo hello-pty & exit /b 3"))
+    assert "hello-pty" in out
+    assert code == 3
+    assert not p.is_alive()
+
+
+def test_write_reaches_child():
+    out, code, _ = run(_shell_cmd("read x; echo got:$x", "set /p x= & call echo got:%x%"),
+                       write="abc\r")
+    assert "got:abc" in out
+    assert code == 0
+
+
+@pytest.mark.skipif(IS_WINDOWS, reason="stty is POSIX only")
+def test_size_and_resize():
+    out, _, _ = run(["/bin/sh", "-c", "stty size; sleep 1; stty size"], cols=90, rows=25,
+                    resize=(120, 40))
+    assert "25 90" in out and "40 120" in out
+
+
+def test_relative_shell_refused():
+    with pytest.raises(PtyError):
+        PtyProcess(["sh"], {}, None, 80, 24, lambda d: None, lambda c: None)
+
+
+def test_terminate():
+    argv = _shell_cmd("sleep 30", "ping -n 30 127.0.0.1 >NUL")
+    done = threading.Event()
+    p = PtyProcess(argv, dict(__import__("os").environ), None, 80, 24,
+                   lambda d: None, lambda c: done.set())
+    p.terminate()
+    assert done.wait(10)
+    assert not p.is_alive()

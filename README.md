@@ -1,8 +1,8 @@
 # termSwitch
 
 termSwitch is a small desktop app for macOS and Windows. It shows your AWS profiles in a
-tree grouped the way you want, and opens a terminal already set to the profile you
-double-click.
+tree grouped the way you want. Double-click a profile and it opens a terminal tab, right
+inside the app, already set to that profile.
 
 *Flip the switch, not the profile.*
 
@@ -53,6 +53,14 @@ to start.
 You still need the AWS CLI v2 installed. Everything else is bundled.
 
 ## Features
+
+- **Embedded terminal tabs.** Each profile opens in its own tab next to the profile tree:
+  - PowerShell on Windows (through ConPTY), your login shell on macOS
+  - colored tabs (red for production)
+  - 10,000 lines of scrollback, and full-screen programs such as `less`, `vim` and the
+    `aws ... help` pager
+  - Shift+double-click, or Ctrl+Shift+T, opens the profile in Windows Terminal or
+    iTerm2 instead. Change the default under Settings > Open profiles in.
 
 - **Groups stored in `~/.aws/config`.** They live in an `x_group` key on each profile, so
   they follow the file to any machine. Drag and drop rewrites only the lines it needs to,
@@ -120,7 +128,7 @@ the warning case).
 | Check | Error | Warning |
 | --- | --- | --- |
 | Python | Older than 3.10 | Past end of life |
-| PySide6-Essentials, shiboken6, configupdater | Missing or below the minimum | A minor or major version behind PyPI |
+| PySide6-Essentials, shiboken6, configupdater, pyte, pywinpty (Windows) / ptyprocess (macOS) | Missing or below the minimum | A minor or major version behind PyPI |
 | AWS CLI | Missing, v1, or older than 2.9 | A minor version behind the latest v2 release |
 | Terminal | No usable terminal (macOS: `osascript` missing) | Windows Terminal not installed |
 | AWS config | Does not parse | Missing; writable by other users; owned by someone else; profile names with control characters |
@@ -161,6 +169,11 @@ the lookup off in Settings.
 
 **Starting programs**
 
+- Embedded shells get the same scrubbed environment as external terminals, plus
+  `AWS_PROFILE`. The shell is an absolute path:
+  - Windows: `pwsh`, or the system PowerShell
+  - macOS: your login shell, checked against `/etc/shells`
+
 - Executables are resolved to absolute paths. PATH lookups skip relative entries and the
   current directory, so a planted `aws` or `wt` in the working directory is never picked
   up.
@@ -194,8 +207,14 @@ the lookup off in Settings.
 
 **Supply chain**
 
-- The only dependencies are `PySide6-Essentials` (not the full PySide6, which adds Qt
-  WebEngine and other large modules) and `configupdater`.
+- The dependencies are kept small:
+  - `PySide6-Essentials`, not the full PySide6, which adds Qt WebEngine and other large
+    modules
+  - `configupdater`
+  - for terminals: `pyte` (VT emulation), `pywinpty` (Windows) or `ptyprocess` (macOS)
+- The terminal is drawn by a native Qt widget, not a browser engine.
+- On Windows, termSwitch talks to ConPTY directly. It does not use pywinpty's
+  `PtyProcess` helper, which relays output through a localhost TCP socket.
 - `requirements.lock`, `requirements-build.lock` and `requirements-dev.lock` pin exact
   versions with hashes for every platform. CI and release builds install only from
   them, with `--require-hashes`. Regenerate after editing a `.in` file:
@@ -243,11 +262,40 @@ grouped by SSO session or credential type; change it under View > Group untagged
 profiles by. Dropping a profile on an automatic group, or on empty space, removes its
 `x_group`.
 
+## Terminal tabs
+
+| Action | Windows | macOS |
+| --- | --- | --- |
+| Copy | Ctrl+Shift+C, or Ctrl+C with text selected | Cmd+C |
+| Paste | Ctrl+V or Ctrl+Shift+V | Cmd+V |
+| Close tab | Ctrl+Shift+W | Cmd+W |
+| Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | same |
+| Focus profiles / terminal | Ctrl+1 / Ctrl+2 | same |
+| Scroll back | Shift+PgUp / PgDn, mouse wheel | same |
+| Clear scrollback | right-click > Clear scrollback | Cmd+K |
+
+Other keys work as usual:
+- Ctrl+C interrupts.
+- Ctrl+R searches history.
+- Tab completes.
+
+Right-click a tab to duplicate, rename, restart (after the shell exits), or open the same
+profile in an external terminal.
+
+Pasting text with more than one line asks first, since each line could run as a command.
+Pasted text is stripped of control characters and escape sequences, and is sent as a
+bracketed paste when the shell supports it, so it can't inject keystrokes. Clipboard
+(OSC 52) and hyperlink (OSC 8) escape sequences from programs are ignored.
+
+Closing a tab that is running a command asks first. On Windows, any live shell counts.
+Quitting termSwitch with terminals open asks first, then ends them.
+
 ## Using it
 
 | Action | How |
 | --- | --- |
-| Open terminal | Double-click, Enter, Ctrl+T, or right-click (single-click is an option) |
+| Open terminal tab | Double-click, Enter, Ctrl+T, or right-click (single-click is an option) |
+| Open in external terminal | Shift+double-click or Ctrl+Shift+T |
 | Open several | Multi-select then Enter, or right-click a group > Open all |
 | Move | Drag profiles or groups onto a group |
 | New group | Toolbar or Ctrl+Shift+N (`A/B` makes nested groups) |
@@ -265,7 +313,7 @@ macOS runners.
 2. Commit, then tag and push:
 
    ```bash
-   git tag v0.3.0
+   git tag v0.4.0
    git push origin main --tags
    ```
 
@@ -335,6 +383,10 @@ termswitch/
   depsui.py        dependency report window
   icon.py          app icon, Windows taskbar identity
   ui.py            main window, drag-and-drop tree, settings
+  terminal_tabs.py embedded terminal tabs
+  terminal_widget.py  terminal view: painting, keys, selection, clipboard
+  terminal_core.py screen model (scrollback, alternate screen), key encoding, paste safety
+  pty_backend.py   ConPTY (Windows) and POSIX pty processes
   assets/          icon in SVG, PNG, ICO, ICNS
 tests/
 tools/build_icons.py

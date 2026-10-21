@@ -18,16 +18,27 @@ is_mac = sys.platform == "darwin"
 is_win = sys.platform.startswith("win")
 NAME = "termSwitch"
 
-from PyInstaller.utils.hooks import copy_metadata  # noqa: E402
+from PyInstaller.utils.hooks import collect_all, copy_metadata  # noqa: E402
 
 # Package metadata lets the in-app dependency check report bundled versions.
 METADATA = (copy_metadata("PySide6-Essentials") + copy_metadata("shiboken6")
-            + copy_metadata("configupdater"))
+            + copy_metadata("configupdater") + copy_metadata("pyte"))
+EXTRA_BINARIES, EXTRA_HIDDEN = [], []
+if is_win:
+    # pywinpty loads conpty.dll / OpenConsole.exe at runtime, so collect the
+    # whole package rather than relying on import analysis.
+    w_datas, w_binaries, w_hidden = collect_all("winpty")
+    METADATA += w_datas + copy_metadata("pywinpty")
+    EXTRA_BINARIES += w_binaries
+    EXTRA_HIDDEN += w_hidden
+else:
+    METADATA += copy_metadata("ptyprocess")
 
 a = Analysis(
     ["run.py"],
     datas=[("termswitch/assets", "termswitch/assets"), *METADATA],
-    hiddenimports=[],
+    binaries=EXTRA_BINARIES,
+    hiddenimports=["pyte", *EXTRA_HIDDEN],
     # Keep the bundle small: none of these are used.
     excludes=["tkinter", "PySide6.QtNetwork", "PySide6.QtQml", "PySide6.QtQuick",
               "PySide6.QtOpenGL", "PySide6.QtPdf", "PySide6.QtSql", "PySide6.QtTest",

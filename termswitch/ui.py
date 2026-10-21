@@ -13,7 +13,8 @@ from PySide6.QtCore import (QFileSystemWatcher, QItemSelectionModel, QSettings, 
 from PySide6.QtGui import (QAction, QBrush, QColor, QDesktopServices, QFont, QIcon,
                            QKeySequence, QPainter, QPixmap, QShortcut, QGuiApplication)
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QColorDialog,
-                               QComboBox, QDialog, QDialogButtonBox, QFormLayout,
+                               QComboBox, QDialog, QDialogButtonBox, QFontComboBox,
+                               QFormLayout, QSpinBox,
                                QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow,
                                QMenu, QMessageBox, QPushButton, QSplitter, QStyle,
                                QTextBrowser, QToolBar, QTreeWidget, QTreeWidgetItem,
@@ -26,6 +27,8 @@ from .launcher import (TERMINAL_CHOICES, LaunchError, LaunchOptions, find_aws, l
                        platform_key)
 from .deps import ERROR as DEP_ERROR, WARN as DEP_WARN, summary as dep_summary, worst
 from .depsui import DependencyDialog, DependencyRunner
+from .terminal_tabs import TerminalTabs
+from .terminal_widget import default_font
 from .status import CHECKING, ERROR, EXPIRED, UNKNOWN, VALID, StatusChecker, StatusResult
 
 ROLE = Qt.ItemDataRole.UserRole
@@ -60,7 +63,15 @@ DEFAULTS = {
     "confirm_prod": True,
     "check_updates_online": True,
     "show_dep_warnings": True,
+    "open_mode": "embedded",
+    "term_font_family": "",
+    "term_font_size": 0,
+    "term_scrollback": 10000,
+    "confirm_close_tab": True,
+    "confirm_multiline_paste": True,
 }
+
+OPEN_MODES = [("embedded", "Embedded tab in termSwitch"), ("external", "External terminal")]
 
 KIND_LABELS = {"sso": "IAM Identity Center (SSO)", "role": "Assume role",
                "process": "credential_process", "static": "Static access keys",
@@ -216,11 +227,45 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("Settings")
         form = QFormLayout()
 
+        self.open_mode = QComboBox()
+        for value, label in OPEN_MODES:
+            self.open_mode.addItem(label, value)
+        self._select(self.open_mode, get_setting(settings, "open_mode"))
+        self.open_mode.setToolTip("Shift+double-click a profile to use the other one.")
+        form.addRow("Open profiles in:", self.open_mode)
+
+        self.font_family = QFontComboBox()
+        self.font_family.setFontFilters(QFontComboBox.FontFilter.MonospacedFonts)
+        current_font = default_font(get_setting(settings, "term_font_family"),
+                                    get_setting(settings, "term_font_size"))
+        self.font_family.setCurrentFont(current_font)
+        self.font_size = QSpinBox()
+        self.font_size.setRange(6, 36)
+        self.font_size.setValue(current_font.pointSize())
+        font_row = QHBoxLayout()
+        font_row.addWidget(self.font_family, 1)
+        font_row.addWidget(self.font_size)
+        form.addRow("Terminal font:", font_row)
+
+        self.scrollback = QSpinBox()
+        self.scrollback.setRange(1000, 100000)
+        self.scrollback.setSingleStep(1000)
+        self.scrollback.setValue(get_setting(settings, "term_scrollback"))
+        form.addRow("Scrollback lines:", self.scrollback)
+
+        self.confirm_close = QCheckBox("Ask before closing a tab that is running a command")
+        self.confirm_close.setChecked(get_setting(settings, "confirm_close_tab"))
+        form.addRow("", self.confirm_close)
+
+        self.confirm_paste = QCheckBox("Ask before pasting more than one line")
+        self.confirm_paste.setChecked(get_setting(settings, "confirm_multiline_paste"))
+        form.addRow("", self.confirm_paste)
+
         self.terminal = QComboBox()
         for value, label in TERMINAL_CHOICES[platform_key()]:
             self.terminal.addItem(label, value)
         self._select(self.terminal, get_setting(settings, "terminal"))
-        form.addRow("Terminal:", self.terminal)
+        form.addRow("External terminal:", self.terminal)
 
         self.new_window = QCheckBox("Open a new window instead of a new tab")
         self.new_window.setChecked(get_setting(settings, "new_window"))
@@ -236,7 +281,7 @@ class SettingsDialog(QDialog):
         self.export.setChecked(get_setting(settings, "export_credentials"))
         form.addRow("", self.export)
 
-        self.single_click = QCheckBox("Open a terminal with a single click")
+        self.single_click = QCheckBox("Open a profile with a single click")
         self.single_click.setChecked(get_setting(settings, "single_click"))
         form.addRow("", self.single_click)
 
@@ -292,6 +337,12 @@ class SettingsDialog(QDialog):
             return
         s = self.settings
         s.setValue("terminal", self.terminal.currentData())
+        s.setValue("open_mode", self.open_mode.currentData())
+        s.setValue("term_font_family", self.font_family.currentFont().family())
+        s.setValue("term_font_size", self.font_size.value())
+        s.setValue("term_scrollback", self.scrollback.value())
+        s.setValue("confirm_close_tab", self.confirm_close.isChecked())
+        s.setValue("confirm_multiline_paste", self.confirm_paste.isChecked())
         s.setValue("new_window", self.new_window.isChecked())
         s.setValue("auto_sso_login", self.auto_login.isChecked())
         s.setValue("export_credentials", self.export.isChecked())
@@ -326,7 +377,7 @@ class MainWindow(QMainWindow):
         self._icons: dict[str, QIcon] = {}
 
         self.setWindowTitle("termSwitch")
-        self.resize(980, 640)
+        self.resize(1280, 780)
 
         self.checker = StatusChecker(self)
         self.checker.status_ready.connect(self._on_status)
@@ -344,9 +395,11 @@ class MainWindow(QMainWindow):
         geometry = self.settings.value("geometry")
         if geometry is not None:
             self.restoreGeometry(geometry)
-        splitter_state = self.settings.value("splitter")
-        if splitter_state is not None:
-            self.splitter.restoreState(splitter_state)
+        for key, splitter in (("main_splitter", self.splitter),
+                              ("left_splitter", self.left_splitter)):
+            state = self.settings.value(key)
+            if state is not None:
+                splitter.restoreState(state)
 
         self.reload()
 
@@ -387,32 +440,48 @@ class MainWindow(QMainWindow):
         self.tree.customContextMenuRequested.connect(self._context_menu)
         lv.addWidget(self.tree)
 
-        right = QWidget()
-        rv = QVBoxLayout(right)
-        rv.setContentsMargins(0, 6, 6, 6)
+        details_box = QWidget()
+        rv = QVBoxLayout(details_box)
+        rv.setContentsMargins(6, 0, 0, 6)
         self.details = QTextBrowser()
         # Links are opened by us, and only when they are plain https URLs.
         self.details.setOpenLinks(False)
         self.details.anchorClicked.connect(self._open_link)
         rv.addWidget(self.details)
         buttons = QHBoxLayout()
-        self.btn_open = QPushButton("Open terminal")
-        self.btn_open.clicked.connect(self.open_selected)
+        self.btn_open = QPushButton("Open")
+        self.btn_open.setToolTip("Open the selected profile (Shift+click: the other mode)")
+        self.btn_open.clicked.connect(lambda: self.open_selected(
+            invert=bool(QGuiApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier)))
         self.btn_login = QPushButton("SSO login")
         self.btn_login.clicked.connect(self.login_selected)
-        self.btn_check = QPushButton("Check status")
+        self.btn_check = QPushButton("Check")
         self.btn_check.clicked.connect(self.check_selected)
         for b in (self.btn_open, self.btn_login, self.btn_check):
             buttons.addWidget(b)
         buttons.addStretch(1)
         rv.addLayout(buttons)
 
+        self.left_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.left_splitter.addWidget(left)
+        self.left_splitter.addWidget(details_box)
+        self.left_splitter.setStretchFactor(0, 3)
+        self.left_splitter.setStretchFactor(1, 2)
+        self.left_splitter.setChildrenCollapsible(True)
+
+        self.terminals = TerminalTabs(self._placeholder_html())
+        self.terminals.open_external_requested.connect(
+            lambda prof: self.open_profiles([prof], external=True))
+        self.terminals.count_changed.connect(self._on_tab_count)
+        self._apply_terminal_settings()
+
         self.splitter = QSplitter()
-        self.splitter.addWidget(left)
-        self.splitter.addWidget(right)
-        self.splitter.setStretchFactor(0, 1)
+        self.splitter.addWidget(self.left_splitter)
+        self.splitter.addWidget(self.terminals)
+        self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
-        self.splitter.setSizes([420, 560])
+        self.splitter.setCollapsible(1, False)
+        self.splitter.setSizes([330, 950])
         self.setCentralWidget(self.splitter)
 
         for key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
@@ -439,8 +508,24 @@ class MainWindow(QMainWindow):
             a.triggered.connect(slot)
             return a
 
-        self.act_open = action("Open terminal", self.open_selected,
+        self.act_open = action("Open terminal", lambda: self.open_selected(),
                                QStyle.StandardPixmap.SP_MediaPlay, "Ctrl+T")
+        self.act_open_ext = action("Open in external terminal",
+                                   lambda: self.open_selected(invert=None, external=True),
+                                   QStyle.StandardPixmap.SP_ComputerIcon, "Ctrl+Shift+T")
+        self.act_close_tab = action("Close tab", self.close_current_tab, None,
+                                    QKeySequence.StandardKey.Close if platform_key() == "darwin"
+                                    else "Ctrl+Shift+W")
+        self.act_next_tab = action("Next tab", lambda: self._cycle_tab(1), None, "Ctrl+Tab")
+        self.act_prev_tab = action("Previous tab", lambda: self._cycle_tab(-1), None,
+                                   "Ctrl+Shift+Tab")
+        self.act_focus_tree = action("Focus profiles", lambda: self.tree.setFocus(), None,
+                                     "Ctrl+1")
+        self.act_focus_term = action("Focus terminal", self._focus_terminal, None, "Ctrl+2")
+        for a in (self.act_close_tab, self.act_next_tab, self.act_prev_tab,
+                  self.act_focus_tree, self.act_focus_term):
+            a.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
+            self.addAction(a)
         self.act_new_group = action("New group", lambda: self.new_group(None),
                                     QStyle.StandardPixmap.SP_FileDialogNewFolder, "Ctrl+Shift+N")
         self.act_check_all = action("Check all", self.check_all,
@@ -465,6 +550,12 @@ class MainWindow(QMainWindow):
         menu_file.addAction(quit_act)
 
         menu_view = self.menuBar().addMenu("&View")
+        menu_view.addAction(self.act_close_tab)
+        menu_view.addAction(self.act_next_tab)
+        menu_view.addAction(self.act_prev_tab)
+        menu_view.addAction(self.act_focus_tree)
+        menu_view.addAction(self.act_focus_term)
+        menu_view.addSeparator()
         menu_view.addAction(action("Expand all", self.tree.expandAll))
         menu_view.addAction(action("Collapse all", self.tree.collapseAll))
         menu_view.addSeparator()
@@ -480,6 +571,7 @@ class MainWindow(QMainWindow):
 
         menu_profiles = self.menuBar().addMenu("&Profiles")
         menu_profiles.addAction(self.act_open)
+        menu_profiles.addAction(self.act_open_ext)
         menu_profiles.addAction(action("SSO login", self.login_selected))
         menu_profiles.addAction(action("Check selected", self.check_selected))
         menu_profiles.addAction(self.act_check_all)
@@ -743,9 +835,23 @@ class MainWindow(QMainWindow):
             tab_color=self._profile_color(profile),
         )
 
-    def open_profiles(self, profiles: list[Profile]):
+    def _external_for(self, invert: bool | None, external: bool | None) -> bool:
+        if external is not None:
+            return external
+        is_external = get_setting(self.settings, "open_mode") == "external"
+        return (not is_external) if invert else is_external
+
+    def open_profiles(self, profiles: list[Profile], external: bool | None = None,
+                      invert: bool | None = False):
         if not profiles:
             return
+        bad = [p for p in profiles if p.problem]
+        if bad:
+            QMessageBox.warning(self, "Cannot open profile",
+                                "\n".join(f"{p.name!r}: {p.problem}" for p in bad))
+            profiles = [p for p in profiles if not p.problem]
+            if not profiles:
+                return
         if len(profiles) > 8:
             ok = QMessageBox.question(self, "Open terminals",
                                       f"Open {len(profiles)} terminals?")
@@ -759,22 +865,30 @@ class MainWindow(QMainWindow):
                     "Open a terminal for production profile(s)?\n\n" + "\n".join(prod))
                 if ok != QMessageBox.StandardButton.Yes:
                     return
+        use_external = self._external_for(invert, external)
         for prof in profiles:
             try:
-                launch(prof, self._launch_options(prof))
+                if use_external:
+                    launch(prof, self._launch_options(prof))
+                else:
+                    self.terminals.open_profile(prof, self._launch_options(prof))
             except LaunchError as exc:
                 QMessageBox.warning(self, "Could not open terminal", str(exc))
                 return
         names = ", ".join(p.name for p in profiles)
-        self.statusBar().showMessage(f"Opened terminal: {names}", 4000)
+        where = "external terminal" if use_external else "tab"
+        self.statusBar().showMessage(f"Opened {where}: {names}", 4000)
 
-    def open_selected(self):
-        self.open_profiles(self.selected_profiles())
+    def open_selected(self, invert: bool | None = False, external: bool | None = None):
+        self.open_profiles(self.selected_profiles(), external=external, invert=invert)
+
+    def _shift_held(self) -> bool:
+        return bool(QGuiApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier)
 
     def _on_double_click(self, item: QTreeWidgetItem, _col: int):
         kind, value = item.data(0, ROLE)
         if kind == KIND_PROFILE:
-            self.open_profiles([self.store.profiles[value]])
+            self.open_profiles([self.store.profiles[value]], invert=self._shift_held())
 
     def _on_click(self, item: QTreeWidgetItem, _col: int):
         if not get_setting(self.settings, "single_click"):
@@ -784,6 +898,45 @@ class MainWindow(QMainWindow):
         kind, value = item.data(0, ROLE)
         if kind == KIND_PROFILE:
             self.open_profiles([self.store.profiles[value]])
+
+    # ---- terminal tabs ---------------------------------------------------
+
+    def _apply_terminal_settings(self):
+        t = self.terminals
+        t.font = default_font(get_setting(self.settings, "term_font_family"),
+                              get_setting(self.settings, "term_font_size"))
+        t.scrollback = get_setting(self.settings, "term_scrollback")
+        t.confirm_close = get_setting(self.settings, "confirm_close_tab")
+        t.confirm_multiline_paste = get_setting(self.settings, "confirm_multiline_paste")
+        for term in t.terminals():
+            term.set_font(t.font)
+            term.confirm_multiline_paste = t.confirm_multiline_paste
+
+    def close_current_tab(self):
+        idx = self.terminals.tabs.currentIndex()
+        if idx >= 0 and self.terminals.tabs.count():
+            self.terminals.close_tab(idx)
+
+    def _cycle_tab(self, step: int):
+        tabs = self.terminals.tabs
+        if tabs.count():
+            tabs.setCurrentIndex((tabs.currentIndex() + step) % tabs.count())
+
+    def _focus_terminal(self):
+        term = self.terminals.current_terminal()
+        if term:
+            term.setFocus()
+
+    def _on_tab_count(self, count: int):
+        self.act_close_tab.setEnabled(count > 0)
+
+    def _placeholder_html(self) -> str:
+        return ("<div style='color:#8a8f98'>"
+                "<h2>No terminals open</h2>"
+                "<p>Double-click a profile to open it in a tab here.<br>"
+                "Shift+double-click opens it in an external terminal instead.</p>"
+                "<p><code>Ctrl+Tab</code> next tab &nbsp; <code>Ctrl+1</code> / "
+                "<code>Ctrl+2</code> profiles / terminal</p></div>")
 
     # ---- actions: status and login --------------------------------------
 
@@ -1140,6 +1293,7 @@ class MainWindow(QMainWindow):
     def open_settings(self):
         dlg = SettingsDialog(self.settings, self)
         if dlg.exec():
+            self._apply_terminal_settings()
             self._sync_auto_group_actions()
             self.rebuild()
 
@@ -1216,8 +1370,18 @@ class MainWindow(QMainWindow):
             f"AWS CLI: {html.escape(find_aws() or 'not found')}")
 
     def closeEvent(self, event):
+        running = self.terminals.running_count()
+        if running:
+            ok = QMessageBox.question(
+                self, "Quit termSwitch",
+                f"{running} terminal(s) are still running. Quit and end them?")
+            if ok != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+        self.terminals.close_all()
         self.settings.setValue("geometry", self.saveGeometry())
-        self.settings.setValue("splitter", self.splitter.saveState())
+        self.settings.setValue("main_splitter", self.splitter.saveState())
+        self.settings.setValue("left_splitter", self.left_splitter.saveState())
         self._save_expanded()
         super().closeEvent(event)
 

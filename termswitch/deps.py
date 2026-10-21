@@ -45,7 +45,12 @@ PACKAGES = {
     "PySide6-Essentials": "6.6.0",
     "shiboken6": "6.6.0",
     "configupdater": "3.1.0",
+    "pyte": "0.8.2",
 }
+if sys.platform.startswith("win"):
+    PACKAGES["pywinpty"] = "2.0.14"     # ConPTY for embedded terminals
+else:
+    PACKAGES["ptyprocess"] = "0.7.0"
 # AWS CLI 2.9 added sso-session support and 'configure export-credentials'.
 MIN_AWS_CLI = "2.9.0"
 
@@ -59,7 +64,8 @@ FROZEN = bool(getattr(sys, "frozen", False))  # running from the packaged app
 # Module that carries each distribution's version, for packaged builds where
 # package metadata is not bundled.
 _VERSION_MODULES = {"PySide6-Essentials": "PySide6", "shiboken6": "shiboken6",
-                    "configupdater": "configupdater"}
+                    "configupdater": "configupdater", "ptyprocess": "ptyprocess",
+                    "pywinpty": "winpty"}
 
 
 @dataclass
