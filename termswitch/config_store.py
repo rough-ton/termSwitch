@@ -34,6 +34,8 @@ from typing import Callable, Iterable, Iterator
 
 from configupdater import ConfigUpdater
 
+from .fileutil import replace_file
+
 GROUP_KEY = "x_group"
 COLOR_KEY = "x_color"
 SCHEME_KEY = "x_term_scheme"
@@ -749,7 +751,7 @@ class ProfileStore:
         self._write_target()
         stamp = time.strftime("%Y%m%d-%H%M%S")
         dest = self.config_file.with_name(f"{self.config_file.name}.termswitch-reset-{stamp}.bak")
-        os.replace(self.config_file, dest)
+        replace_file(self.config_file, dest)
         self._save_undo(dest.read_text(encoding="utf-8"), "Reset config")
         self._undo_expected = ""
         self.load()
@@ -888,7 +890,7 @@ class ProfileStore:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 fh.write(original)
-            os.replace(tmp, path)
+            replace_file(tmp, path)
         except BaseException:
             try:
                 os.unlink(tmp)
@@ -938,7 +940,7 @@ class ProfileStore:
     def _atomic_write(self, text: str) -> None:
         target = self._write_target()
         _ensure_private_dir(target.parent)
-        # mkstemp creates the file 0600 in the same directory, so os.replace is atomic.
+        # mkstemp creates the file 0600 in the same directory, so the replace is atomic.
         fd, tmp = tempfile.mkstemp(prefix=".config-", dir=target.parent)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -947,7 +949,7 @@ class ProfileStore:
                 os.fsync(fh.fileno())
             if target.exists():
                 shutil.copymode(target, tmp)
-            os.replace(tmp, target)
+            replace_file(tmp, target)
         except BaseException:
             try:
                 os.unlink(tmp)

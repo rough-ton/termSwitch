@@ -24,6 +24,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from .aws_name_overrides import OVERRIDES
+from .fileutil import replace_file
 from .launcher import build_env, find_aws
 
 INDEX_VERSION = 1
@@ -374,7 +375,7 @@ def save_cache(cat: Catalog, data_dir: Path | None) -> None:
         fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".aws-commands-")
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, separators=(",", ":"))
-        os.replace(tmp, path)
+        replace_file(tmp, path)
     except OSError:
         pass
 

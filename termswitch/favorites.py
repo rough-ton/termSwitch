@@ -15,6 +15,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QSettings, Signal
 
+from .fileutil import replace_file
+
 SETTINGS_KEY = "favorite_commands"
 DEFAULTS_ADDED_KEY = "favorite_commands_defaults_added"
 
@@ -158,7 +160,7 @@ class Favorites(QObject):
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 fh.write(text)
-            os.replace(tmp, path)
+            replace_file(tmp, path)
         except BaseException:
             try:
                 os.unlink(tmp)
