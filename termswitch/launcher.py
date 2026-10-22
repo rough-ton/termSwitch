@@ -373,7 +373,8 @@ def user_shell(platform: str | None = None) -> str:
 
 
 def posix_init_script(profile: Profile, opts: LaunchOptions, aws: str | None) -> str:
-    """Identity check, SSO login and optional credential export, in POSIX sh."""
+    """Identity check and SSO login, in POSIX sh. Credential export happens later,
+    after the user's shell startup files (see SHELL_REAPPLY)."""
     p = shlex.quote(profile.name)
     aws_cmd = shlex.quote(aws or "aws")
     check = f"{aws_cmd} sts get-caller-identity --output table"
@@ -383,10 +384,119 @@ def posix_init_script(profile: Profile, opts: LaunchOptions, aws: str | None) ->
                      f"login...\\033[0m\\n'; {aws_cmd} sso login --profile {p} && {check}; }}")
     else:
         parts.append(check)
-    if opts.export_credentials:
-        parts.append(f"eval \"$({aws_cmd} configure export-credentials --profile {p} "
-                     f"--format env)\" && echo 'Exported temporary credentials.'")
     return "; ".join(parts)
+
+
+# --------------------------------------------------------------------------
+# Re-applying the tab's profile after the user's shell startup files
+# --------------------------------------------------------------------------
+#
+# A tab starts the user's own login shell, whose startup files run after
+# termSwitch set AWS_PROFILE. A line like `export AWS_PROFILE=other` in
+# ~/.zshrc would silently switch every command in the tab to another account.
+# So each shell is started through small wrapper files that load the user's
+# real startup files first and then re-apply the tab's profile. The wrappers
+# read everything from TERMSWITCH_* environment variables, so their content
+# is fixed and they are written once per run to a private (0700) directory.
+
+SHELL_REAPPLY = r"""# termSwitch: re-apply the tab's AWS profile after the user's startup files.
+if [ -n "${TERMSWITCH_AWS_PROFILE-}" ]; then
+  if [ "${AWS_PROFILE-}" != "$TERMSWITCH_AWS_PROFILE" ]; then
+    printf '\033[33mtermSwitch: your shell startup set AWS_PROFILE=%s. This tab uses %s.\033[0m\n' \
+      "${AWS_PROFILE-}" "$TERMSWITCH_AWS_PROFILE"
+  fi
+  if [ -n "${AWS_ACCESS_KEY_ID-}${AWS_SECRET_ACCESS_KEY-}${AWS_SESSION_TOKEN-}" ]; then
+    printf '\033[33mtermSwitch: your shell startup exported AWS keys. They were removed so the profile is used.\033[0m\n'
+  fi
+  unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_SECURITY_TOKEN \
+        AWS_CREDENTIAL_EXPIRATION AWS_DEFAULT_PROFILE
+  export AWS_PROFILE="$TERMSWITCH_AWS_PROFILE"
+  if [ "${TERMSWITCH_EXPORT_CREDS-}" = 1 ]; then
+    eval "$("${TERMSWITCH_AWS:-aws}" configure export-credentials --profile "$AWS_PROFILE" --format env)" \
+      && echo 'Exported temporary credentials to the environment.'
+  fi
+fi
+unset TERMSWITCH_AWS_PROFILE TERMSWITCH_EXPORT_CREDS TERMSWITCH_AWS TERMSWITCH_SHELL_DIR \
+      TERMSWITCH_ZDOTDIR TERMSWITCH_USER_ZDOTDIR
+"""
+
+# zsh reads $ZDOTDIR/.zshenv, .zprofile, .zshrc, .zlogin in that order for an
+# interactive login shell. Each wrapper sources the user's file with ZDOTDIR
+# pointing at the user's directory, then points it back at the wrappers.
+_ZSH_SOURCE = r"""TERMSWITCH_ZDOTDIR="$ZDOTDIR"
+ZDOTDIR="${TERMSWITCH_USER_ZDOTDIR:-$HOME}"
+[ -f "$ZDOTDIR/%(name)s" ] && . "$ZDOTDIR/%(name)s"
+TERMSWITCH_USER_ZDOTDIR="$ZDOTDIR"
+ZDOTDIR="$TERMSWITCH_ZDOTDIR"
+"""
+ZSH_WRAPPERS = {
+    ".zshenv": _ZSH_SOURCE % {"name": ".zshenv"},
+    ".zprofile": _ZSH_SOURCE % {"name": ".zprofile"},
+    ".zshrc": _ZSH_SOURCE % {"name": ".zshrc"},
+    # Last file of startup: hand ZDOTDIR back to the user, then re-apply.
+    ".zlogin": (_ZSH_SOURCE % {"name": ".zlogin"}).replace(
+        'ZDOTDIR="$TERMSWITCH_ZDOTDIR"\n', 'ZDOTDIR="$TERMSWITCH_USER_ZDOTDIR"\n')
+        + '. "$TERMSWITCH_SHELL_DIR/reapply.sh"\n',
+}
+
+# bash: run as an interactive shell with this rc file, which loads what a
+# login shell would, then re-applies.
+BASH_RC = r"""[ -f /etc/profile ] && . /etc/profile
+if [ -f "$HOME/.bash_profile" ]; then . "$HOME/.bash_profile"
+elif [ -f "$HOME/.bash_login" ]; then . "$HOME/.bash_login"
+elif [ -f "$HOME/.profile" ]; then . "$HOME/.profile"
+elif [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"
+fi
+. "$TERMSWITCH_SHELL_DIR/reapply.sh"
+"""
+
+# fish runs -C commands after its config files.
+FISH_REAPPLY = r"""if set -q TERMSWITCH_AWS_PROFILE
+  if test "$AWS_PROFILE" != "$TERMSWITCH_AWS_PROFILE"
+    printf '\e[33mtermSwitch: your shell startup set AWS_PROFILE=%s. This tab uses %s.\e[0m\n' "$AWS_PROFILE" "$TERMSWITCH_AWS_PROFILE"
+  end
+  if set -q AWS_ACCESS_KEY_ID; or set -q AWS_SECRET_ACCESS_KEY; or set -q AWS_SESSION_TOKEN
+    printf '\e[33mtermSwitch: your shell startup exported AWS keys. They were removed so the profile is used.\e[0m\n'
+  end
+  for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_SECURITY_TOKEN AWS_CREDENTIAL_EXPIRATION AWS_DEFAULT_PROFILE
+    set -e $v
+  end
+  set -gx AWS_PROFILE $TERMSWITCH_AWS_PROFILE
+  if test "$TERMSWITCH_EXPORT_CREDS" = 1
+    $TERMSWITCH_AWS configure export-credentials --profile $AWS_PROFILE --format env | source
+    and echo 'Exported temporary credentials to the environment.'
+  end
+end
+for v in TERMSWITCH_AWS_PROFILE TERMSWITCH_EXPORT_CREDS TERMSWITCH_AWS TERMSWITCH_SHELL_DIR
+  set -e $v
+end
+"""
+
+_SHELL_DIR: str | None = None
+
+
+def shell_wrapper_dir() -> str:
+    """Private directory holding the wrapper startup files for this run."""
+    global _SHELL_DIR
+    if _SHELL_DIR and os.path.isdir(_SHELL_DIR):
+        return _SHELL_DIR
+    import atexit
+    import shutil
+    import tempfile
+    d = tempfile.mkdtemp(prefix="termswitch-shell-")       # created 0700
+    zdir = os.path.join(d, "zsh")
+    os.mkdir(zdir, 0o700)
+    files = {os.path.join(d, "reapply.sh"): SHELL_REAPPLY,
+             os.path.join(d, "bashrc"): BASH_RC,
+             os.path.join(d, "reapply.fish"): FISH_REAPPLY}
+    files.update({os.path.join(zdir, name): body for name, body in ZSH_WRAPPERS.items()})
+    for path, body in files.items():
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(body)
+    atexit.register(shutil.rmtree, d, True)
+    _SHELL_DIR = d
+    return d
 
 
 def embedded_command(profile: Profile, opts: LaunchOptions, platform: str | None = None,
@@ -410,10 +520,29 @@ def embedded_command(profile: Profile, opts: LaunchOptions, platform: str | None
     if not env.get("LANG") and not env.get("LC_ALL"):
         env["LANG"] = "en_US.UTF-8"   # apps started from Finder get no locale
     shell = user_shell(platform)
-    # /bin/sh runs the init (so it works for any login shell, fish included),
-    # then replaces itself with the user's interactive login shell.
+    wrappers = shell_wrapper_dir()
+    env["TERMSWITCH_AWS_PROFILE"] = profile.name
+    env["TERMSWITCH_EXPORT_CREDS"] = "1" if opts.export_credentials else "0"
+    env["TERMSWITCH_AWS"] = aws or "aws"
+    env["TERMSWITCH_SHELL_DIR"] = wrappers
+    # /bin/sh runs the identity check, then replaces itself with the user's
+    # interactive shell, started so that the tab's profile is re-applied after
+    # the user's own startup files.
     init = posix_init_script(profile, opts, aws)
-    return ["/bin/sh", "-c", f"{init}; exec {shlex.quote(shell)} -l"], env
+    q = shlex.quote(shell)
+    name = os.path.basename(shell)
+    if name == "zsh":
+        env["TERMSWITCH_USER_ZDOTDIR"] = os.environ.get("ZDOTDIR") or os.path.expanduser("~")
+        env["ZDOTDIR"] = os.path.join(wrappers, "zsh")
+        start = f"exec {q} -l"
+    elif name == "bash":
+        start = f"exec {q} --rcfile {shlex.quote(os.path.join(wrappers, 'bashrc'))} -i"
+    elif name == "fish":
+        start = f"exec {q} -l -C {shlex.quote('source ' + os.path.join(wrappers, 'reapply.fish'))}"
+    else:
+        # Other shells: start as before. Startup files could still override.
+        start = f"exec {q} -l"
+    return ["/bin/sh", "-c", f"{init}; {start}"], env
 
 
 def launch(profile: Profile, opts: LaunchOptions, platform: str | None = None) -> None:
