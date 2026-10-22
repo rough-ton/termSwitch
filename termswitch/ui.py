@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QColo
                                QStyle, QTextBrowser, QToolBar, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget, QFileDialog)
 
-from . import __version__
 from .config_store import (SEP, ConfigError, Profile, ProfileStore, is_within, join_group,
                            leaf_name, natural_key, parent_group, safe_https_url)
 from .launcher import (TERMINAL_CHOICES, LaunchError, LaunchOptions, aws_setup_command,
@@ -33,7 +32,8 @@ from .profile_dialogs import (KIND_ROLE, KIND_SSO, ProfileDialog, SsoSessionDial
 from .deps import ERROR as DEP_ERROR, WARN as DEP_WARN, summary as dep_summary, worst
 from .depsui import DependencyDialog, DependencyRunner
 from .legal import LicensesDialog
-from .icons import AUTO_GROUP_ICONS, icon as material_icon, shell_icon
+from .icons import (AUTO_GROUP_ICONS, PROFILE_KIND_ICONS, decorate_menu, icon as material_icon,
+                    install_icon_theme, shell_icon)
 from .aws_params import is_destructive, needs_confirmation
 from .commands_pane import CommandsPane, VerticalTab
 from .terminal_tabs import TerminalTabs
@@ -396,6 +396,7 @@ def get_setting(settings: QSettings, key: str):
 class MainWindow(QMainWindow):
     def __init__(self, store: ProfileStore | None = None, settings: QSettings | None = None):
         super().__init__()
+        install_icon_theme(QApplication.instance())
         self.settings = settings or QSettings()
         if store is None:
             apply_config_file_setting(self.settings)
@@ -415,6 +416,10 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._build_actions()
+        # Menu bar menus can be native (macOS), so decorate them directly too.
+        for menu_action in self.menuBar().actions():
+            if menu_action.menu() is not None:
+                decorate_menu(menu_action.menu())
 
         self.watcher = QFileSystemWatcher(self)
         self.watcher.fileChanged.connect(self._schedule_reload)
@@ -613,8 +618,8 @@ class MainWindow(QMainWindow):
                                  QStyle.StandardPixmap.SP_BrowserReload, QKeySequence.StandardKey.Refresh)
         self.act_settings = action("Settings", self.open_settings, None, "Ctrl+,")
         self.act_settings.setIcon(material_icon("settings"))
-        self.act_new_profile = action("New profile", lambda: self._new_profile_here(),
-                                      QStyle.StandardPixmap.SP_FileIcon)
+        self.act_new_profile = action("New profile", lambda: self._new_profile_here())
+        self.act_new_profile.setIcon(material_icon("key"))
         self.act_new_profile.setToolTip("Create a profile in the selected group (Ctrl+N in the tree)")
         for a in (self.act_open, self.act_new_group, self.act_check_all, self.act_reload,
                   self.act_settings):
@@ -845,7 +850,9 @@ class MainWindow(QMainWindow):
         result = self.status.get(prof.name)
         state = result.state if result else UNKNOWN
         color = self._profile_color(prof)
-        it.setIcon(0, self._icon(state))
+        # Profile type icon with the status dot in the corner.
+        it.setIcon(0, material_icon(PROFILE_KIND_ICONS.get(prof.kind, "settings"),
+                                    dot=STATUS_COLORS[state]))
         if color:
             it.setForeground(0, QBrush(QColor(color)))
         if prof.problem:

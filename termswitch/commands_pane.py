@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (QAbstractButton, QComboBox, QFileDialog, QFormLay
 from .aws_commands import Catalog, Command, load_catalog
 from .aws_params import load_spec
 from .favorites import DEFAULT_FAVORITES, Favorites, key_for
-from .icons import star_icon
+from .icons import service_icon, star_icon
 from .param_form import ParameterForm
 
 DOCS_URL = "https://awscli.amazonaws.com/v2/documentation/api/latest/reference/{svc}/{op}.html"
@@ -312,6 +312,9 @@ class CommandsPane(QWidget):
             self.service.addItem(label, svc.name)
             self.service.setItemData(self.service.count() - 1, svc.title,
                                      Qt.ItemDataRole.ToolTipRole)
+            svc_icon = service_icon(svc.name)
+            if svc_icon is not None:
+                self.service.setItemIcon(self.service.count() - 1, svc_icon)
         idx = self.service.findData(current) if current else 0
         self.service.setCurrentIndex(max(idx, 0))
         self.service.blockSignals(False)

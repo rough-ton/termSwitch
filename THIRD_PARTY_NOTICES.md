@@ -259,7 +259,8 @@ created by Philipp Kief and maintained by Material Extensions.
 - Version: commit `13025adc5ad10a5cc649528a2c1edec93069f1b9`
 - License: MIT, reproduced below and in `termswitch/assets/icons/material/LICENSE`
 
-Some icons depict third-party brands, such as AWS and PowerShell. Those marks belong to
+Some icons depict third-party brands, such as AWS, PowerShell, Docker, Kubernetes,
+Git and GitHub. Those marks belong to
 their owners and are used only to identify the related technology. The MIT license
 covers the icon artwork and grants no trademark rights.
 
