@@ -27,6 +27,7 @@ from .launcher import (TERMINAL_CHOICES, LaunchError, LaunchOptions, find_aws, l
                        platform_key)
 from .deps import ERROR as DEP_ERROR, WARN as DEP_WARN, summary as dep_summary, worst
 from .depsui import DependencyDialog, DependencyRunner
+from .legal import LicensesDialog
 from .icons import AUTO_GROUP_ICONS, icon as material_icon, shell_icon
 from .aws_params import is_destructive, needs_confirmation
 from .commands_pane import CommandsPane, VerticalTab
@@ -626,6 +627,7 @@ class MainWindow(QMainWindow):
 
         menu_help = self.menuBar().addMenu("&Help")
         menu_help.addAction(action("Check dependencies...", self.show_dependency_dialog))
+        menu_help.addAction(action("Licenses...", lambda: self.show_licenses()))
         about = action("About", self.about)
         about.setMenuRole(QAction.MenuRole.AboutRole)
         menu_help.addAction(about)
@@ -1483,14 +1485,29 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.store.config_file.parent)))
 
     def about(self):
-        QMessageBox.about(
-            self, "About termSwitch",
-            f"<b>termSwitch</b> {__version__}<br><br>"
+        box = QMessageBox(self)
+        box.setWindowTitle("About termSwitch")
+        box.setIconPixmap(self.windowIcon().pixmap(64, 64))
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        box.setText(
+            f"<b>termSwitch</b> {html.escape(__version__)}<br><br>"
             f"Config: {html.escape(str(self.store.config_file))}<br>"
             f"AWS CLI: {html.escape(find_aws() or 'not found')}<br><br>"
+            "Copyright (c) 2026 Mike Roughton. Released under the MIT license.<br>"
             "Icons from the <a href='https://github.com/material-extensions/"
             "vscode-material-icon-theme'>Material Icon Theme</a> by Philipp Kief and "
-            "Material Extensions, MIT license. See THIRD_PARTY_NOTICES.md.")
+            "Material Extensions (MIT).<br>"
+            "Built with Qt for Python under the LGPL 3.0. See Licenses for all "
+            "third-party notices.")
+        licenses = box.addButton("Licenses...", QMessageBox.ButtonRole.HelpRole)
+        box.addButton(QMessageBox.StandardButton.Ok)
+        box.exec()
+        if box.clickedButton() is licenses:
+            self.show_licenses()
+
+    def show_licenses(self, start: str | None = None):
+        LicensesDialog(self, start=start).exec()
 
     def closeEvent(self, event):
         running = self.terminals.running_count()

@@ -22,7 +22,8 @@ from PyInstaller.utils.hooks import collect_all, copy_metadata  # noqa: E402
 
 # Package metadata lets the in-app dependency check report bundled versions.
 METADATA = (copy_metadata("PySide6-Essentials") + copy_metadata("shiboken6")
-            + copy_metadata("configupdater") + copy_metadata("pyte"))
+            + copy_metadata("configupdater") + copy_metadata("pyte")
+            + copy_metadata("wcwidth"))
 EXTRA_BINARIES, EXTRA_HIDDEN = [], []
 if is_win:
     # pywinpty loads conpty.dll / OpenConsole.exe at runtime, so collect the
@@ -34,9 +35,32 @@ if is_win:
 else:
     METADATA += copy_metadata("ptyprocess")
 
+# License texts shown in Help > Licenses (termswitch/legal.py reads them from here).
+# On macOS, PyInstaller places data files in termSwitch.app/Contents/Resources.
+LEGAL = [("LICENSE", "legal"), ("THIRD_PARTY_NOTICES.md", "legal"),
+         ("licenses/*.txt", "legal/licenses")]
+
+
+def _python_license():
+    """The license file of the interpreter being bundled, so the notice is exact."""
+    ver = f"python{sys.version_info[0]}.{sys.version_info[1]}"
+    for rel in ("LICENSE.txt", os.path.join("lib", ver, "LICENSE.txt")):
+        path = os.path.join(sys.base_prefix, rel)
+        if os.path.isfile(path):
+            return path
+    raise SystemExit("Python's LICENSE.txt was not found; it must ship with the build.")
+
+
+import shutil  # noqa: E402
+
+_py_lic = os.path.join(workpath, "Python-LICENSE.txt")  # noqa: F821
+os.makedirs(workpath, exist_ok=True)  # noqa: F821
+shutil.copyfile(_python_license(), _py_lic)
+LEGAL.append((_py_lic, "legal/licenses"))
+
 a = Analysis(
     ["run.py"],
-    datas=[("termswitch/assets", "termswitch/assets"), *METADATA],
+    datas=[("termswitch/assets", "termswitch/assets"), *LEGAL, *METADATA],
     binaries=EXTRA_BINARIES,
     hiddenimports=["pyte", *EXTRA_HIDDEN],
     # Keep the bundle small: none of these are used.
