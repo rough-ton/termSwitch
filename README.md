@@ -369,6 +369,14 @@ Other keys work as usual:
 Right-click a tab to duplicate, rename, restart (after the shell exits), or open the same
 profile in an external terminal.
 
+On macOS, a tab starts your normal login shell (zsh, bash or fish) with all of your
+startup files, then re-applies the tab's profile last.
+- If a startup file sets `AWS_PROFILE` or exports AWS keys, the tab keeps its own profile,
+  removes the keys, and prints a one-line note.
+- Your files are loaded unchanged, and zsh's `ZDOTDIR` is restored afterwards.
+- On Windows, PowerShell's profile script runs before termSwitch sets the profile, so the
+  tab's profile always wins there too.
+
 Pasting text with more than one line asks first, since each line could run as a command.
 Pasted text is stripped of control characters and escape sequences, and is sent as a
 bracketed paste when the shell supports it, so it can't inject keystrokes. Clipboard
