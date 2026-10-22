@@ -48,8 +48,8 @@ If the AWS CLI isn't installed, the panel says so and links to the dependency ch
 
 ![Profiles grouped in the tree](images/profile-groups.png)
 
-Each AWS profile shows an orange cloud icon, with a dot in the corner for its
-credential status: grey for not checked, green for signed in, orange for expired or
+Each AWS profile shows an orange cloud marked "AWS", with a dot in the top-right corner
+for its credential status: grey for not checked, green for signed in, orange for expired or
 not logged in, and red for an error. SSH sessions, when they arrive, will use a teal
 terminal icon.
 

@@ -133,12 +133,12 @@ def test_tree_uses_the_aws_icon(qapp, tmp_path, monkeypatch):
     used = []
     real = icons.icon.__wrapped__
 
-    def spy(name, dot=None, gray=False):
-        used.append(name)
-        return real(name, dot, gray)
+    def spy(name, dot=None, gray=False, corner="br"):
+        used.append((name, corner))
+        return real(name, dot, gray, corner)
     monkeypatch.setattr(ui, "material_icon", spy)
     w = ui.MainWindow(store=store, settings=settings)
     w.rebuild()
-    assert used.count("aws") >= 2
+    assert used.count(("aws", "tr")) >= 2          # status dot clear of the text
     w.close()
     w.deleteLater()
