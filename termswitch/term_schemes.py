@@ -17,6 +17,8 @@ import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .fileutil import replace_file
+
 MATCH_APP = "match"                 # setting value: follow the app theme
 MAX_IMPORT_BYTES = 512 * 1024
 _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -172,7 +174,7 @@ def save_user_scheme(scheme: ColorScheme, folder: Path | None = None) -> Path:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(scheme.to_json(), fh, indent=2)
-        os.replace(tmp, target)
+        replace_file(tmp, target)
     except BaseException:
         try:
             os.unlink(tmp)
