@@ -71,8 +71,8 @@ def test_semantic_colors_are_readable(colors, background):
 def test_no_hard_coded_colors_in_ui_code():
     """Colors with a meaning come from theme.py. Allowed: status dots, the production
     marker, the color picker's default, icon and terminal scheme definitions."""
-    allowed_files = {"theme.py", "term_schemes.py", "terminal_core.py", "icons.py",
-                     "build_icons.py"}
+    allowed_files = {"theme.py", "term_schemes.py", "system_terminal.py", "terminal_core.py",
+                     "icons.py", "build_icons.py"}
     allowed = {"#9aa0a6", "#f2b01e", "#2ea44f", "#e8710a", "#d93025",   # status dots
                "#c0392b", "#2d7ff9"}
     found = []
@@ -99,10 +99,42 @@ def test_set_role(qapp):
 def test_builtin_schemes():
     assert {"Dark", "Light", "High contrast"} <= set(ts.BUILTIN)
     assert ts.BUILTIN["Dark"].is_dark and not ts.BUILTIN["Light"].is_dark
-    for s in ts.BUILTIN.values():
+    # termSwitch's own schemes are tuned for contrast. The popular ones below keep
+    # their projects' published colors as they are.
+    for name in ("Dark", "Light", "High contrast"):
+        s = ts.BUILTIN[name]
         assert _contrast(s.foreground, s.background) >= 7, s.name
         for color in s.ansi[1:7]:                         # red .. cyan
             assert _contrast(color, s.background) >= 2.5, (s.name, color)
+
+
+def test_popular_schemes_are_bundled():
+    assert ts.POPULAR == ("Dracula", "Catppuccin Mocha", "Catppuccin Latte", "Solarized Dark",
+                          "Solarized Light", "Nord", "Gruvbox Dark")
+    for name in ts.POPULAR:
+        s = ts.BUILTIN[name]
+        assert s.builtin and s.name == name and len(s.ansi) == 16
+        # Solarized is deliberately soft: its light body text is 4.1:1.
+        assert _contrast(s.foreground, s.background) >= 4, name
+    light = {n for n in ts.POPULAR if not ts.BUILTIN[n].is_dark}
+    assert light == {"Catppuccin Latte", "Solarized Light"}
+    # Spot checks against the published palettes.
+    assert ts.BUILTIN["Dracula"].background == "#282a36"
+    assert ts.BUILTIN["Solarized Dark"].background == "#002b36"
+    assert ts.BUILTIN["Nord"].background == "#2e3440"
+    assert ts.BUILTIN["Gruvbox Dark"].ansi[9] == "#fb4934"
+    assert ts.BUILTIN["Catppuccin Mocha"].foreground == "#cdd6f4"
+
+
+def test_an_import_cannot_replace_a_bundled_scheme(tmp_path):
+    folder = tmp_path / "schemes"
+    folder.mkdir()
+    fake = {**ts.BUILTIN["Dark"].to_json(), "name": "Dracula"}
+    (folder / "Dracula.json").write_text(json.dumps(fake), encoding="utf-8")
+    assert "Dracula" not in ts.load_user_schemes(folder)
+    assert ts.all_schemes(folder)["Dracula"].background == "#282a36"
+    with pytest.raises(ts.SchemeError):
+        ts.save_user_scheme(ts.BUILTIN["Nord"], folder)
 
 
 def test_resolve():
@@ -298,3 +330,152 @@ def test_settings_dialog_saves_theme_and_scheme(qapp, tmp_path, monkeypatch):
     assert settings.value("app_theme") == "dark"
     assert settings.value("term_scheme") == "High contrast"
     dlg.deleteLater()
+
+
+def test_schemes_never_change_anything_outside_termswitch(qapp, tmp_path, monkeypatch):
+    """Switching schemes only repaints termSwitch's own tabs. It writes no files
+    outside the app (other terminals' settings, shell startup files) and sends
+    nothing to the running shell, such as color-changing escape codes."""
+    from PySide6.QtCore import QSettings
+
+    from termswitch import ui
+    from termswitch.config_store import ProfileStore
+    from termswitch.terminal_tabs import TabInfo
+    from termswitch.terminal_widget import TerminalWidget
+    home = tmp_path / "home"
+    others = {
+        # Windows Terminal, iTerm2, Terminal.app and shell startup files.
+        "AppData/Local/Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/"
+        "settings.json": '{"schemes": []}',
+        "Library/Preferences/com.googlecode.iterm2.plist": "<plist/>",
+        "Library/Preferences/com.apple.Terminal.plist": "<plist/>",
+        ".zshrc": "# zsh", ".bashrc": "# bash",
+        "Documents/PowerShell/Microsoft.PowerShell_profile.ps1": "# pwsh",
+    }
+    for rel, text in others.items():
+        (home / rel).parent.mkdir(parents=True, exist_ok=True)
+        (home / rel).write_text(text, encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+
+    def snapshot():
+        return {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
+    before = snapshot()
+
+    cfg = tmp_path / "config"
+    cfg.write_text("[profile a]\nregion = us-west-2\n", encoding="utf-8")
+    store = ProfileStore(cfg, tmp_path / "credentials")
+    settings = QSettings(str(tmp_path / "ui.ini"), QSettings.Format.IniFormat)
+    settings.setValue("check_on_startup", False)
+    monkeypatch.setattr(ui.MainWindow, "run_dependency_check", lambda *a, **k: None)
+    w = ui.MainWindow(store=store, settings=settings)
+
+    class RecordingPty:
+        def __init__(self):
+            self.sent = []
+
+        def write(self, text):
+            self.sent.append(text)
+
+        def is_alive(self):
+            return True
+    t = TerminalWidget(["/bin/sh", "-c", "true"], {})
+    t.pty = RecordingPty()
+    w.terminals._infos[id(t)] = TabInfo(store.profiles["a"], None, t, "a")
+    w.terminals.tabs.addTab(t, "a")
+    try:
+        for name in ts.POPULAR:                   # the default for every tab
+            settings.setValue("term_scheme", name)
+            w.terminals.apply_schemes(store.profiles)
+            assert t.scheme.name == name
+        for name in ts.POPULAR:                   # one profile's own scheme
+            w.set_profile_scheme([store.profiles["a"]], name)
+            assert t.scheme.name == name
+        w.theme.apply("dark")
+        w.theme.apply("light")
+        assert t.pty.sent == []                   # nothing sent to the shell
+        assert snapshot() == before               # no files changed outside the app
+    finally:
+        t.pty = None
+        w.terminals.tabs.clear()
+        w.terminals._infos.clear()
+        w.close()
+        w.deleteLater()
+
+
+# ---- 256-color palette codes and Powerline separators -------------------------------
+
+def test_palette_codes_use_the_scheme_colors():
+    """Prompt themes pick colors 0 to 15 with 38;5;n / 48;5;n. Those are the
+    scheme's colors, not fixed xterm values."""
+    import pyte
+
+    from termswitch.terminal_core import TerminalScreen
+    s = TerminalScreen(20, 2)
+    pyte.Stream(s).feed("\x1b[38;5;4;48;5;13mA\x1b[38;5;200mB\x1b[105mC\x1b[38;5;1;39mD"
+                        "\x1b[0mE\x1b[38;2;1;2;3mF\x1b[38;5;9;1mG")
+    cells = [(c.data, c.fg, c.bg) for c in s.buffer[0].values()]
+    assert cells == [("A", "blue", "brightmagenta"), ("B", "ff00d7", "brightmagenta"),
+                     ("C", "ff00d7", "brightmagenta"), ("D", "default", "brightmagenta"),
+                     ("E", "default", "default"), ("F", "010203", "default"),
+                     ("G", "brightred", "default")]
+    dracula = ts.BUILTIN["Dracula"]
+    assert dracula.resolve("blue", "#000000") == "#bd93f9"
+    assert dracula.resolve("brightmagenta", "#000000") == "#ff92df"
+
+
+def test_powerline_arrows_fill_the_cell(qapp):
+    """The solid arrow is drawn as a shape: its flat side fills the whole cell
+    height, so it joins the segment before it with no seam."""
+    from PySide6.QtGui import QColor, QImage
+
+    from termswitch.terminal_widget import TerminalWidget
+    t = TerminalWidget(["/bin/true"], {})
+    t.set_scheme(ts.BUILTIN["Dracula"])
+    t.screen.resize(2, 20)
+    # A red segment, then a red arrow on the default background.
+    t.stream.feed("\x1b[41m  \x1b[0;31m\ue0b0\x1b[0m")
+    # Paint straight into an image. Showing and grabbing a top-level window
+    # crashed Python 3.12 on CI, and nothing here needs a window.
+    cw, ch = t._cw, t._ch
+    t.viewport().resize(int(cw * 20) + 2, int(ch * 2) + 2)
+    img = QImage(t.viewport().size(), QImage.Format.Format_ARGB32)
+    img.fill(0)
+    t.viewport().render(img)
+    red = QColor(ts.BUILTIN["Dracula"].ansi[1])
+    bg = QColor(ts.BUILTIN["Dracula"].background)
+
+    def px(x, y):
+        return img.pixelColor(int(x), int(y))
+
+    def near(a, b):
+        return all(abs(x - y) <= 24 for x, y in zip(a.getRgb()[:3], b.getRgb()[:3]))
+    x0 = 2 * cw                                          # where the arrow cell starts
+    # No seam where the segment meets the arrow: solid red across the boundary.
+    for y in (ch / 4, ch / 3, ch / 2, ch * 2 / 3, ch * 3 / 4):
+        for x in (x0 - 1, x0 - 0.5, x0, x0 + 0.5, x0 + 1):
+            assert near(px(x, y), red), (x, y)
+    # Inside the point, well clear of its anti-aliased edge (cells are as narrow as
+    # 8 to 13 pixels depending on the platform's font).
+    assert near(px(x0 + cw * 0.6, ch / 2), red)
+    assert near(px(x0 + cw - 1, 1), bg)                   # outside the arrow
+    assert near(px(x0 + cw - 1, ch - 1.5), bg)
+    t.deleteLater()
+
+
+def test_theme_change_skips_widgets_being_deleted(qapp, monkeypatch):
+    """Switching themes right after a tab closes must not touch deleted widgets."""
+    from PySide6.QtWidgets import QApplication, QLabel
+
+    alive = QLabel("x")
+    theme.set_role(alive, "hint")
+    doomed = QLabel("y")
+
+    class Gone:
+        def property(self, name):
+            raise RuntimeError("Internal C++ object already deleted.")
+    monkeypatch.setattr(QApplication, "allWidgets", staticmethod(lambda: [Gone(), doomed, alive]))
+    theme._recolor_roles()                      # no error
+    assert alive.palette().color(alive.foregroundRole()).name() == theme.colors().hint
+    alive.deleteLater()
+    doomed.deleteLater()

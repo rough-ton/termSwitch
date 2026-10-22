@@ -27,6 +27,7 @@ Versions are the ones pinned in `requirements.lock` and `requirements-build.lock
 | `pyinstaller` (bootloader and runtime only) | 6.22.3 | GPL-2.0-or-later with the Bootloader Exception; runtime hooks Apache-2.0 | https://github.com/pyinstaller/pyinstaller |
 | Python runtime | 3.13 | PSF-2.0 | https://www.python.org/downloads/source/ |
 | Material Icon Theme (icons) | `13025ad` | MIT | https://github.com/material-extensions/vscode-material-icon-theme |
+| Terminal color schemes: Dracula, Catppuccin, Solarized, Nord, Gruvbox (colors only) | n/a | MIT | see [Terminal color schemes](#terminal-color-schemes) |
 
 `ptyprocess` is in the macOS build only. `keyring` and the `jaraco` and
 `more-itertools` packages it uses are in the macOS and Windows builds, for saving SSH
@@ -510,3 +511,44 @@ The built-in terminal schemes are termSwitch's own, informed by these color sets
 
 Both licenses are MIT; the full MIT text appears above with the Windows Terminal
 components.
+
+For **Match my system terminal**, termSwitch includes the colors of Windows Terminal's
+built-in schemes (Campbell, One Half Dark and the rest), from
+`src/cascadia/TerminalSettingsModel/defaults.json` in https://github.com/microsoft/terminal
+(MIT, Copyright (c) Microsoft Corporation; the MIT text appears above).
+
+termSwitch also bundles the published colors of these schemes, unchanged. Only the
+color values are used; no code or other files from these projects are included.
+
+- **Dracula:** from https://github.com/dracula/windows-terminal.
+  Copyright (c) 2019 thismat.
+- **Catppuccin Mocha and Catppuccin Latte:** from
+  https://github.com/catppuccin/windows-terminal. Copyright (c) 2021 Catppuccin.
+- **Solarized Dark and Solarized Light:** the palette and terminal color mapping from
+  https://github.com/altercation/solarized. Copyright (c) 2011 Ethan Schoonover.
+- **Nord:** the palette from https://github.com/nordtheme/nord, mapped to terminal
+  colors as in Nord's terminal ports. Copyright (c) 2016-present Sven Greb.
+- **Gruvbox Dark:** the palette from https://github.com/morhetz/gruvbox, by morhetz,
+  released under the MIT/X11 license.
+
+Each is released under the MIT license:
+
+```
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

@@ -116,6 +116,43 @@ BUILTIN = {
          "#ffffff", "#9e9e9e", "#ff8080", "#80ff80", "#ffff80", "#8cb8ff", "#ff8cff",
          "#80ffff", "#ffffff"), builtin=True),
 }
+
+# Popular schemes, with each project's published colors (MIT licensed; credited in
+# THIRD_PARTY_NOTICES.md). Order: foreground, background, cursor, selection, then
+# black, red, green, yellow, blue, magenta, cyan, white and their bright versions.
+# They only color termSwitch's own tabs; nothing outside the app is changed.
+_POPULAR = [
+    # Dracula, from dracula/windows-terminal.
+    ("Dracula", "#f8f8f2", "#282a36", "#f8f8f2", "#44475a",
+     ("#21222c", "#ff5555", "#50fa7b", "#f1fa8c", "#bd93f9", "#ff79c6", "#8be9fd", "#f8f8f2",
+      "#6272a4", "#ff6e6e", "#69ff94", "#ffffa5", "#d6acff", "#ff92df", "#a4ffff", "#ffffff")),
+    # Catppuccin Mocha and Latte, from catppuccin/windows-terminal.
+    ("Catppuccin Mocha", "#cdd6f4", "#1e1e2e", "#f5e0dc", "#585b70",
+     ("#45475a", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#bac2de",
+      "#585b70", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#a6adc8")),
+    ("Catppuccin Latte", "#4c4f69", "#eff1f5", "#dc8a78", "#acb0be",
+     ("#5c5f77", "#d20f39", "#40a02b", "#df8e1d", "#1e66f5", "#ea76cb", "#179299", "#acb0be",
+      "#acb0be", "#d20f39", "#40a02b", "#df8e1d", "#1e66f5", "#ea76cb", "#179299", "#bcc0cc")),
+    # Solarized, from the palette and terminal mapping in altercation/solarized.
+    ("Solarized Dark", "#839496", "#002b36", "#93a1a1", "#073642",
+     ("#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198", "#eee8d5",
+      "#002b36", "#cb4b16", "#586e75", "#657b83", "#839496", "#6c71c4", "#93a1a1", "#fdf6e3")),
+    ("Solarized Light", "#657b83", "#fdf6e3", "#586e75", "#eee8d5",
+     ("#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198", "#eee8d5",
+      "#002b36", "#cb4b16", "#586e75", "#657b83", "#839496", "#6c71c4", "#93a1a1", "#fdf6e3")),
+    # Nord, from the palette in nordtheme/nord, mapped as in its terminal ports.
+    ("Nord", "#d8dee9", "#2e3440", "#d8dee9", "#434c5e",
+     ("#3b4252", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#88c0d0", "#e5e9f0",
+      "#4c566a", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#8fbcbb", "#eceff4")),
+    # Gruvbox Dark, from the palette in morhetz/gruvbox.
+    ("Gruvbox Dark", "#ebdbb2", "#282828", "#ebdbb2", "#504945",
+     ("#282828", "#cc241d", "#98971a", "#d79921", "#458588", "#b16286", "#689d6a", "#a89984",
+      "#928374", "#fb4934", "#b8bb26", "#fabd2f", "#83a598", "#d3869b", "#8ec07c", "#ebdbb2")),
+]
+POPULAR = tuple(name for name, *_ in _POPULAR)
+for _name, _fg, _bg, _cursor, _sel, _ansi in _POPULAR:
+    BUILTIN[_name] = ColorScheme(_name, _fg, _bg, _cursor, _sel, _ansi, builtin=True)
+
 DEFAULT_DARK, DEFAULT_LIGHT = "Dark", "Light"
 
 
@@ -182,6 +219,27 @@ def save_user_scheme(scheme: ColorScheme, folder: Path | None = None) -> Path:
             pass
         raise
     return target
+
+
+def delete_user_scheme(name: str, folder: Path | None = None) -> bool:
+    """Remove an imported scheme. Built-in schemes can't be removed."""
+    if name in BUILTIN:
+        raise SchemeError(f"'{name}' is built in and can't be removed.")
+    folder = folder or user_dir()
+    if not folder.is_dir():
+        return False
+    removed = False
+    for path in folder.glob("*.json"):
+        try:
+            if path.stat().st_size > MAX_IMPORT_BYTES:
+                continue
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and str(data.get("name", "")).strip() == name:
+            path.unlink()
+            removed = True
+    return removed
 
 
 def scheme_for(choice: str, app_theme: str, schemes: dict[str, ColorScheme]) -> ColorScheme:

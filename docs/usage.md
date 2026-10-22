@@ -23,7 +23,29 @@
 ![The termSwitch main window](images/main-window.png)
 
 The window has three parts: the profile tree on the left, terminal tabs in the middle,
-and the Commands pane on the right.
+and the Commands pane on the right. The bottom left shows the termSwitch version and a
+link to support termSwitch development, with status messages next to it.
+
+### Home view
+
+When no terminals are open, the middle shows the home view:
+
+- **Local terminal** opens a plain shell, as described under
+  [Local terminals](#local-terminals).
+- **New profile...** and **New SSH session...** open the same editors as the toolbar
+  and tree menus.
+- **Reopen previous tabs** opens the profiles and SSH sessions that were open in tabs
+  when termSwitch last closed. Quitting with no tabs open keeps the previous set.
+  Profiles and sessions that no longer exist are skipped, and production profiles
+  still ask first.
+- **Find a profile or SSH session** suggests names as you type. Pick one, or press
+  Enter when the text names exactly one, to open it. When a profile and an SSH session
+  share a name, the session is listed with "(SSH)" after it.
+- **Recent** shows the last nine profiles and SSH sessions you opened. Click one to
+  open it again. Renamed profiles keep their place; deleted ones drop off.
+
+Recent items and previous tabs are stored with termSwitch's other settings, as profile
+names and session IDs only.
 
 ## Getting started without a config
 
@@ -142,7 +164,7 @@ Open terminal tabs for a renamed or deleted profile keep running with the old
 `AWS_PROFILE`. Their tab title says "(renamed)" or "(deleted)", and they can't be
 duplicated.
 
-**Production profiles** (matching the production pattern in Settings) need a second
+**Production profiles** (matching the production pattern in Settings > Profiles) need a second
 confirmation to rename or delete: type the profile name.
 
 **Undo** reverses the last change to the config or your SSH sessions, including
@@ -225,7 +247,20 @@ Each profile opens in its own tab:
 - 10,000 lines of scrollback, and full-screen programs such as `less`, `vim` and the
   `aws ... help` pager
 - Shift+double-click, or Ctrl+Shift+T, opens the profile in Windows Terminal or iTerm2
-  instead. Change the default under Settings > Open profiles in.
+  instead. Change the default under Settings > General > Open profiles in.
+
+### Local terminals
+
+**File > New local terminal** (Ctrl+Shift+L, Cmd+Shift+L on macOS), or **Local terminal**
+on the home view, opens a tab with a plain shell that isn't tied to an AWS profile or
+SSH session: PowerShell on Windows, your login shell on macOS. It starts in your home
+folder.
+
+The tab gets the same cleaned environment as every other tab, so AWS keys or an
+`AWS_PROFILE` that termSwitch itself was started with don't carry over. AWS CLI
+commands in it use the CLI's defaults, or whatever your own shell startup files set.
+Right-click the tab to duplicate or rename it. **Reopen previous tabs** brings local
+tabs back too.
 
 ### Keyboard shortcuts
 
@@ -233,6 +268,7 @@ Each profile opens in its own tab:
 | --- | --- | --- |
 | Copy | Ctrl+Shift+C, or Ctrl+C with text selected | Cmd+C |
 | Paste | Ctrl+V or Ctrl+Shift+V | Cmd+V |
+| New local terminal | Ctrl+Shift+L | Cmd+Shift+L |
 | Close tab | Ctrl+Shift+W | Cmd+W |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | same |
 | Focus profiles / terminal | Ctrl+1 / Ctrl+2 | same |
@@ -406,25 +442,88 @@ version:
 
 ## Themes and terminal colors
 
-Settings has the appearance options:
+**Settings** (Ctrl+, on Windows, Cmd+, on macOS, where it's in the termSwitch menu) has
+four tabs:
 
-- **Theme:** Follow system (the default), Light or Dark. termSwitch looks the same on
-  Windows and macOS in each. With Follow system, it switches when the OS does, without
-  a restart.
-- **Terminal colors:** the color scheme for terminal tabs.
+| Tab | What's in it |
+| --- | --- |
+| General | Theme, whether profiles open in a tab or an external terminal, single-click opening |
+| Terminal | Theme (scheme and preview), font, scrollback, Powerline separators, close and paste prompts, the external terminal |
+| Profiles | A section per cloud provider: AWS (credential checks and SSO login, exporting credentials, grouping untagged profiles), with Azure, GCP and OCI marked "Feature coming soon"; and the production pattern, which applies to all providers |
+| Dependencies | Checking for newer versions, showing warnings at startup, and running the check now |
+
+termSwitch reopens Settings on the tab you used last.
+
+- **Theme** (General): Follow system (the default), Light or Dark. termSwitch looks the
+  same on Windows and macOS in each. With Follow system, it switches when the OS does,
+  without a restart.
+- **Scheme** (Terminal > Theme): the colors of terminal tabs. A preview shows the
+  prompt colors and all 16 palette colors.
   - **Match the app theme** (the default) uses the built-in Light scheme with the light
     theme, and Dark with the dark theme.
-  - Or pick one scheme for every tab: Dark, Light, High contrast, or one you imported.
+  - **Match my system terminal** uses the colors of the terminal you use outside
+    termSwitch, as described under [Matching your system terminal](#matching-your-system-terminal).
+  - Or pick one scheme for every tab: termSwitch's own Dark, Light and High contrast;
+    the popular **Dracula**, **Catppuccin Mocha**, **Catppuccin Latte**, **Solarized
+    Dark**, **Solarized Light**, **Nord** and **Gruvbox Dark**, with each project's
+    published colors; or one you imported.
   - **Import...** reads a Windows Terminal color scheme (`.json`, a single scheme or a
     whole `settings.json`) or an iTerm2 `.itermcolors` file. Imported schemes are saved
-    in termSwitch's data folder.
-- **Terminal font:** the font family and size for terminal tabs.
+    in termSwitch's data folder and marked "(imported)" in the list. **Remove** deletes
+    the selected imported scheme. **Find more schemes** opens iterm2colorschemes.com,
+    which has hundreds of `.itermcolors` files to download and import.
+- **Font** (Terminal): the font family and size for terminal tabs.
+- **Draw Powerline prompt separators** (Terminal): on by default. See
+  [Powerline prompts](#powerline-prompts).
 
 To give one profile its own colors, right-click it > **Terminal colors** and pick a
 scheme, for example High contrast for production. **Default** goes back to the setting
 above. The choice is saved in `~/.aws/config` as `x_term_scheme`, next to `x_group`.
 
-Changes apply to open tabs right away; the shells keep running.
+Changes are applied to open tabs immediately, while Settings is still open, and the
+shells keep running. **Cancel** puts the previous look back.
+
+Schemes only color termSwitch's own tabs. Choosing one never changes Windows Terminal,
+iTerm2, Terminal.app or your shell's startup files, and nothing is sent to the running
+shell. Profiles opened in an external terminal (Shift+double-click) keep that
+terminal's own colors.
+
+### Matching your system terminal
+
+**Match my system terminal** reads the colors of the terminal you use outside
+termSwitch, so tabs look the same in both:
+
+- **Windows:** the color scheme of Windows Terminal's default profile, from its
+  `settings.json` (the Store, Preview or unpackaged install). A profile with separate
+  light and dark schemes follows termSwitch's theme. Windows Terminal's built-in schemes,
+  such as Campbell and One Half Dark, are included. Without Windows Terminal, the
+  console's Campbell colors are used.
+- **macOS:** iTerm2's default profile when your external terminal is iTerm2 (or Auto
+  with iTerm2 installed), otherwise Terminal.app's default profile. iTerm2 profiles with
+  separate light and dark colors follow termSwitch's theme. Terminal.app's built-in
+  profiles that were never changed don't store their colors, so termSwitch can't read
+  them; edit the profile in Terminal.app once, or pick a scheme here.
+
+termSwitch only reads these files and never changes them. They're read again when the
+theme changes or you save Settings. Settings shows what was found; when nothing can be
+read, tabs use Match the app theme.
+
+### Powerline prompts
+
+Prompt themes such as Powerlevel10k (zsh), Oh My Posh (PowerShell) and Starship (both)
+work in termSwitch tabs, since each tab runs your own shell with its own startup files.
+
+- The arrow-shaped separators between prompt segments are drawn by termSwitch to fill
+  each cell exactly, so segments meet without gaps and the arrows show even with a
+  plain font. To use your font's own separator shapes, turn off **Draw Powerline prompt
+  separators** in Settings > Terminal.
+- There's no switch for Powerlevel10k itself: it's part of your shell setup. To use a
+  different prompt in termSwitch than elsewhere, check `TERM_PROGRAM`, which termSwitch
+  sets to `termSwitch` in every tab, in your `~/.zshrc` or PowerShell profile.
+- Prompt icons (folders, git branches, the Apple logo) need a Nerd Font, such as
+  MesloLGS NF. Install it, then choose it under Settings > Terminal > Font.
+- Colors a prompt picks from the 16-color palette, including with 256-color codes as
+  Powerlevel10k does, follow the chosen scheme.
 
 Meaningful colors keep their meaning in both themes: production profiles are red,
 status dots are grey, green, orange and red, and errors in forms are red. Each theme
@@ -442,7 +541,7 @@ followed by "(source)".
   version you're running, a pre-filled bug report with your version and OS, and the
   licenses.
 - **Update status:** downloaded builds check for a newer release in the background,
-  unless Settings turns off checking for newer versions. Nothing is shown when the
+  unless Settings > Dependencies turns off checking for newer versions. Nothing is shown when the
   check can't reach GitHub.
 - **System information:** versions of termSwitch, the OS, Python, Qt, PySide6 and the
   AWS CLI, the terminal backend and the config file path. **Copy** puts it on the

@@ -33,4 +33,5 @@ python -m termswitch --check --offline  # minimums only, no network
 The latest-version lookup makes HTTPS requests to `pypi.org/pypi/<package>/json`,
 the AWS CLI v2 changelog on `raw.githubusercontent.com`, and the latest termSwitch release on `api.github.com`. Certificates are verified,
 responses are size-capped, and nothing is sent except a User-Agent string. You can turn
-the lookup off in Settings.
+the lookup off in Settings > Dependencies, which also has a button to run the check
+now.

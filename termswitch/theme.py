@@ -140,10 +140,18 @@ def set_role(widget, role: str | None) -> None:
 
 
 def _recolor_roles() -> None:
+    import shiboken6
     from PySide6.QtWidgets import QApplication
     for widget in QApplication.allWidgets():
-        if widget.property("role") is not None:
-            _apply_role_color(widget)
+        # A widget can be on its way out (a closed tab's scrollbar, say) while this
+        # runs; skip it rather than touching a deleted object.
+        if not shiboken6.isValid(widget):
+            continue
+        try:
+            if widget.property("role") is not None:
+                _apply_role_color(widget)
+        except RuntimeError:
+            continue
 
 
 class ThemeManager(QObject):

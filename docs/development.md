@@ -114,6 +114,7 @@ termswitch/
   icon.py          app icon, Windows taskbar identity
   ui.py            main window, drag-and-drop tree, settings
   terminal_tabs.py embedded terminal tabs
+  home_view.py     home view when no tabs are open, footer and status bar
   terminal_widget.py  terminal view: painting, keys, selection, clipboard
   terminal_core.py screen model (scrollback, alternate screen), key encoding, paste safety
   pty_backend.py   ConPTY (Windows) and POSIX pty processes
@@ -132,6 +133,7 @@ termswitch/
   links.py         every web address the app links to (website, GitHub, releases)
   theme.py         light and dark themes, colors with a meaning
   term_schemes.py  terminal color schemes and scheme import
+  system_terminal.py  reads Windows Terminal, iTerm2 and Terminal.app colors (read only)
   ssh_sessions.py  SSH sessions: storage, ~/.ssh/config, the ssh command, saved passwords
   ssh_dialogs.py   the SSH session editor
 tests/

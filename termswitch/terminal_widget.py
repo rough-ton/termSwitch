@@ -10,7 +10,7 @@ from collections import deque
 import pyte
 from PySide6.QtCore import QEvent, QObject, QPoint, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (QColor, QFont, QFontDatabase, QFontMetricsF, QGuiApplication,
-                           QKeySequence, QPainter, QPen)
+                           QKeySequence, QPainter, QPainterPath, QPen, QPolygonF)
 from PySide6.QtWidgets import QAbstractScrollArea, QMenu, QMessageBox
 
 from .pty_backend import PtyError, PtyProcess
@@ -20,6 +20,78 @@ from .terminal_core import (TerminalScreen, encode_key, paste_line_count,
 
 IS_MAC = sys.platform == "darwin"
 IS_WINDOWS = sys.platform.startswith("win")
+
+# Powerline separators (U+E0B0 to U+E0BF), used by prompt themes such as Powerlevel10k,
+# Oh My Posh and Starship. They are drawn as shapes that fill the cell exactly, as
+# Windows Terminal and kitty do, so segments meet without seams and the arrows show
+# even when the font has no Nerd Font symbols.
+POWERLINE = frozenset(range(0xE0B0, 0xE0C0))
+
+
+def draw_powerline(p: QPainter, code: int, rect: QRectF, color: QColor) -> None:
+    from PySide6.QtCore import QPointF
+    x, y, w, h = rect.x(), rect.y(), rect.width(), rect.height()
+    left, right, top, bottom, mid = x, x + w, y, y + h, y + h / 2
+    # Solid shapes reach a little past their flat side, into the neighbouring
+    # segment, so no background line shows between them.
+    pad = 0.6
+    p.save()
+    p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(color)
+    line = QPen(color, max(1.0, w / 8))
+    line.setCapStyle(Qt.PenCapStyle.FlatCap)
+    line.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+
+    def solid(*pts):
+        p.drawPolygon(QPolygonF([QPointF(a, b) for a, b in pts]))
+
+    def stroke(*pts):
+        p.setPen(line)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawPolyline(QPolygonF([QPointF(a, b) for a, b in pts]))
+
+    if code == 0xE0B0:                         # right-pointing solid arrow
+        solid((left - pad, top), (right, mid), (left - pad, bottom))
+    elif code == 0xE0B1:                       # right-pointing thin arrow
+        stroke((left, top), (right, mid), (left, bottom))
+    elif code == 0xE0B2:                       # left-pointing solid arrow
+        solid((right + pad, top), (left, mid), (right + pad, bottom))
+    elif code == 0xE0B3:                       # left-pointing thin arrow
+        stroke((right, top), (left, mid), (right, bottom))
+    elif code in (0xE0B4, 0xE0B5, 0xE0B6, 0xE0B7):   # rounded caps
+        path = QPainterPath()
+        if code in (0xE0B4, 0xE0B5):           # bulge to the right
+            path.moveTo(left - pad, top)
+            path.arcTo(QRectF(left - w, top, 2 * w, h), 90, -180)
+            if code == 0xE0B4:
+                path.lineTo(left - pad, bottom)
+        else:                                  # bulge to the left
+            path.moveTo(right + pad, top)
+            path.arcTo(QRectF(left, top, 2 * w, h), 90, 180)
+            if code == 0xE0B6:
+                path.lineTo(right + pad, bottom)
+        if code in (0xE0B4, 0xE0B6):
+            path.closeSubpath()
+            p.drawPath(path)
+        else:
+            p.setPen(line)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawPath(path)
+    elif code == 0xE0B8:                       # lower-left triangle
+        solid((left - pad, top), (right, bottom + pad), (left - pad, bottom + pad))
+    elif code == 0xE0BA:                       # lower-right triangle
+        solid((right + pad, top), (right + pad, bottom + pad), (left, bottom + pad))
+    elif code == 0xE0BC:                       # upper-left triangle
+        solid((left - pad, top - pad), (right, top - pad), (left - pad, bottom))
+    elif code == 0xE0BE:                       # upper-right triangle
+        solid((left, top - pad), (right + pad, top - pad), (right + pad, bottom))
+    elif code in (0xE0B9, 0xE0BF):             # backslash separators
+        stroke((left, top), (right, bottom))
+    elif code in (0xE0BB, 0xE0BD):             # forward slash separators
+        stroke((right, top), (left, bottom))
+    p.restore()
+
 
 MAX_FEED_PER_TICK = 256 * 1024   # keep the UI responsive during huge output
 FRAME_MS = 16
@@ -58,6 +130,9 @@ class _Bridge(QObject):
 
 
 class TerminalWidget(QAbstractScrollArea):
+    # Draw Powerline separators as shapes (Settings > Terminal). Applies to all tabs.
+    draw_powerline = True
+
     title_changed = Signal(str)
     exited = Signal(object)          # exit code or None
 
@@ -400,8 +475,10 @@ class TerminalWidget(QAbstractScrollArea):
                 start = col
                 text = [char.data or " "]
                 wide = len(char.data) == 1 and col + 1 < cols and line[col + 1].data == ""
+                powerline = (self.draw_powerline and len(char.data) == 1
+                             and ord(char.data) in POWERLINE)
                 col += 2 if wide else 1
-                if not wide:
+                if not wide and not powerline:
                     while col < cols:
                         nxt = line[col]
                         nfg = resolve(nxt.fg, default_fg)
@@ -424,7 +501,9 @@ class TerminalWidget(QAbstractScrollArea):
                 if bg != default_bg:
                     p.fillRect(rect, QColor(bg))
                 run = "".join(text)
-                if run.strip():
+                if powerline:
+                    draw_powerline(p, ord(run), rect, QColor(fg))
+                elif run.strip():
                     font = (self._font_bold if style[2] else
                             self._font_italic if style[3] else self._font)
                     if style[3] and style[2]:
