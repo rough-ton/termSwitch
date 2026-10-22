@@ -378,11 +378,16 @@ def test_main_window_ssh_flow(qapp, tmp_path, monkeypatch):
     assert "~/.ssh/config" in labels and "~" not in labels and ".ssh" not in labels
     jump = [it for it in w._iter_items() if it.text(0) == "jump"][0]
     assert jump.parent().text(0) == "~/.ssh/config"
-    # Connect: a fake ssh that prints the prompt, so the saved password is typed once.
-    monkeypatch.setattr(ui, "find_ssh", lambda: "/bin/sh")
+    # Connect: a fake ssh that asks for the password like ssh does, so the saved
+    # password is typed once. getpass reads from the terminal without echo on
+    # Windows (ConPTY) and macOS or Linux (pty) alike.
+    fake_ssh = tmp_path / "fake_ssh.py"
+    fake_ssh.write_text("import getpass\n"
+                        "pw = getpass.getpass(\"deploy@web01.example.com's password: \")\n"
+                        "print('got:' + pw, flush=True)\n", encoding="utf-8")
+    monkeypatch.setattr(ui, "find_ssh", lambda: sys.executable)
     monkeypatch.setattr(ui, "ssh_argv", lambda session, ssh: [
-        "/bin/sh", "-c", "printf \"deploy@web01.example.com's password: \"; "
-                         "stty -echo; read pw; stty echo; echo; echo got:$pw"])
+        sys.executable, "-I", "-u", str(fake_ssh)])
     from conftest import pump
     w.resize(1000, 600)
     w.show()
@@ -391,11 +396,11 @@ def test_main_window_ssh_flow(qapp, tmp_path, monkeypatch):
     term = w.terminals.current_terminal()
     info = w.terminals.current_info()
     assert info.ssh_session is s and info.autofill is not None
-    pump(qapp, 5, until=lambda: "got:pw1" in "".join(
+    pump(qapp, 20, until=lambda: "got:pw1" in "".join(
         "".join(c.data for c in line.values()) for line in term.screen.buffer.values()))
     screen = "\n".join("".join(term.screen.buffer[y][x].data for x in range(term.screen.columns))
                        for y in range(term.screen.lines))
-    assert "got:pw1" in screen and screen.count("pw1") == 1     # echoed only by the test shell
+    assert "got:pw1" in screen and screen.count("pw1") == 1     # printed only by fake ssh
     assert info.autofill.done
     w.terminals.close_all()
     # Delete removes the saved password too.

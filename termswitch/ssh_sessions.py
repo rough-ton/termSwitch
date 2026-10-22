@@ -29,6 +29,7 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 from .config_store import normalize_group
+from .fileutil import replace_file
 
 FILE_NAME = "ssh_sessions.json"
 FILE_FORMAT = "termswitch-ssh-sessions"
@@ -431,7 +432,7 @@ class SessionStore:
                 fh.write(text)
                 fh.flush()
                 os.fsync(fh.fileno())
-            os.replace(tmp, self.path)
+            replace_file(tmp, self.path)
         except BaseException:
             try:
                 os.unlink(tmp)
