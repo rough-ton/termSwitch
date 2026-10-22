@@ -24,7 +24,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QColo
 from .config_store import (SEP, ConfigError, Profile, ProfileStore, is_within, join_group,
                            leaf_name, natural_key, parent_group, safe_https_url)
 from .launcher import (TERMINAL_CHOICES, LaunchError, LaunchOptions, aws_setup_command,
-                       find_aws, find_ssh, launch, platform_key, ssh_env)
+                       find_aws, find_ssh, launch, local_command, platform_key,
+                       ssh_env)
 from .config_dialogs import (SECRETS_REFUSED, BackupsDialog, ConfigEditorDialog,
                              WelcomePanel)
 from .profile_dialogs import (KIND_ROLE, KIND_SSO, ProfileDialog, SsoSessionDialog,
@@ -587,6 +588,7 @@ class MainWindow(QMainWindow):
 
         self.home = HomeView()
         self.home.open_requested.connect(self._open_home_item)
+        self.home.local_requested.connect(self.open_local_terminal)
         self.home.new_profile_requested.connect(lambda: self.new_profile())
         self.home.new_ssh_requested.connect(lambda: self.new_ssh_session())
         self.home.reopen_requested.connect(self.reopen_previous_tabs)
@@ -667,6 +669,10 @@ class MainWindow(QMainWindow):
         self.act_open_ext = action("Open in external terminal",
                                    lambda: self.open_selected(invert=None, external=True),
                                    QStyle.StandardPixmap.SP_ComputerIcon, "Ctrl+Shift+T")
+        self.act_local = action("New local terminal", self.open_local_terminal, None,
+                                "Ctrl+Shift+L")
+        self.act_local.setIcon(shell_icon())
+        self.act_local.setToolTip("Open a shell with no AWS profile or SSH session")
         self.act_close_tab = action("Close tab", self.close_current_tab, None,
                                     QKeySequence.StandardKey.Close if platform_key() == "darwin"
                                     else "Ctrl+Shift+W")
@@ -712,6 +718,8 @@ class MainWindow(QMainWindow):
                                              self.use_default_config_file)
 
         menu_file = self.menuBar().addMenu("&File")
+        menu_file.addAction(self.act_local)
+        menu_file.addSeparator()
         menu_file.addAction(self.act_reload)
         menu_file.addSeparator()
         menu_file.addAction(action("Set up AWS SSO...", self.setup_sso))
@@ -1389,6 +1397,9 @@ class MainWindow(QMainWindow):
             info = self.terminals._infos.get(id(term))
             if info is None or info.orphaned:
                 continue
+            if info.local:
+                keys.append("local")          # one per local tab
+                continue
             if info.ssh_session is not None:
                 key = f"ssh:{info.ssh_session.id}"
             elif info.profile is not None:
@@ -1406,11 +1417,22 @@ class MainWindow(QMainWindow):
                 self.settings.setValue(setting, [new if k == old else k for k in keys])
         self._refresh_home()
 
+    def open_local_terminal(self) -> None:
+        try:
+            argv, env, cwd = local_command()
+            self.terminals.open_local(argv, env, cwd)
+        except LaunchError as exc:
+            QMessageBox.warning(self, "Could not open terminal", str(exc))
+
     def reopen_previous_tabs(self) -> None:
-        profiles, sessions = self._resolve_keys(self._settings_list(self.LAST_TABS_KEY))
-        if not profiles and not sessions:
+        keys = self._settings_list(self.LAST_TABS_KEY)
+        profiles, sessions = self._resolve_keys(keys)
+        local = keys.count("local")
+        if not profiles and not sessions and not local:
             self.statusBar().showMessage("None of the previous tabs exist any more.", 5000)
             return
+        for _ in range(local):
+            self.open_local_terminal()
         if profiles:
             self.open_profiles(profiles, external=False)
         for s in sessions:

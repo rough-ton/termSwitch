@@ -197,3 +197,76 @@ def test_reopen_skips_items_that_are_gone(window):
     window.reopen_previous_tabs()
     assert window.opened == []
     assert "None of the previous tabs" in window.statusBar().currentMessage()
+
+
+# ---- local terminal -----------------------------------------------------------
+
+def test_local_command_scrubs_aws_variables(monkeypatch):
+    from termswitch import launcher
+    monkeypatch.setenv("AWS_PROFILE", "leaked")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE")
+    monkeypatch.setattr(launcher, "user_shell", lambda platform=None: "/bin/zsh")
+    argv, env, cwd = launcher.local_command("darwin")
+    assert argv == ["/bin/zsh", "-l"]
+    assert "AWS_PROFILE" not in env and "AWS_ACCESS_KEY_ID" not in env
+    assert env["TERM_PROGRAM"] == "termSwitch" and cwd == str(Path.home())
+    monkeypatch.setattr(launcher, "_which", lambda name, platform=None: None)
+    monkeypatch.setenv("SystemRoot", r"C:\Windows")
+    argv, env, _ = launcher.local_command("win32")
+    assert argv[0].lower().endswith("powershell.exe") and argv[1:] == ["-NoLogo"]
+    assert "AWS_PROFILE" not in env
+
+
+def _fake_local_shell(monkeypatch, tmp_path):
+    """Run a small script instead of the login shell, with the real environment."""
+    import sys
+    from termswitch import launcher, ui
+    script = tmp_path / "shell.py"
+    script.write_text("import os\nprint('AWS=' + str(os.environ.get('AWS_PROFILE')), flush=True)\n"
+                      "input()\n", encoding="utf-8")
+
+    def fake(platform=None):
+        _, env, cwd = launcher.local_command(platform)
+        return [sys.executable, "-I", "-u", str(script)], env, cwd
+    monkeypatch.setattr(ui, "local_command", fake)
+
+
+def _screen(term):
+    return "\n".join("".join(term.screen.buffer[y][x].data for x in range(term.screen.columns))
+                     for y in range(term.screen.lines))
+
+
+def test_file_menu_and_home_open_a_local_terminal(window, qapp, tmp_path, monkeypatch):
+    monkeypatch.setenv("AWS_PROFILE", "leaked")
+    _fake_local_shell(monkeypatch, tmp_path)
+    file_menu = next(a.menu() for a in window.menuBar().actions() if a.text() == "&File")
+    assert file_menu.actions()[0] is window.act_local
+    assert window.act_local.shortcut().toString() == "Ctrl+Shift+L"
+    window.resize(1000, 600)
+    window.show()
+    pump(qapp, 0.2)
+    try:
+        window.act_local.trigger()
+        term = window.terminals.current_terminal()
+        info = window.terminals.current_info()
+        assert info.local and info.profile is None and info.ssh_session is None
+        assert window.terminals.tabs.tabText(0) == "Local"
+        pump(qapp, 15, until=lambda: "AWS=" in _screen(term))
+        assert "AWS=None" in _screen(term)                 # nothing inherited
+        window.home.local_btn.click()
+        assert window.terminals.tabs.count() == 2
+        assert window._open_tab_keys() == ["local", "local"]
+    finally:
+        window.terminals.close_all()
+
+
+def test_reopen_brings_back_local_tabs(window, qapp, tmp_path, monkeypatch):
+    _fake_local_shell(monkeypatch, tmp_path)
+    window.settings.setValue(window.LAST_TABS_KEY, ["local", "aws:acme-dev-admin"])
+    try:
+        window.reopen_previous_tabs()
+        assert window.terminals.tabs.count() == 1          # the profile tab is faked
+        assert window.terminals.current_info().local
+        assert window.opened == ["aws:acme-dev-admin"]
+    finally:
+        window.terminals.close_all()

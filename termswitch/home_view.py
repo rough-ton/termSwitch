@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (QCompleter, QFrame, QGridLayout, QHBoxLayout, QLa
 
 from . import __version__, theme
 from .icon import app_icon
+from .icons import shell_icon
 from .links import WEBSITE
 
 RECENT_LIMIT = 9            # a 3 by 3 grid, like MobaXterm's recent sessions
@@ -34,6 +35,7 @@ class HomeView(QWidget):
     """Logo and name, quick actions, a search box, and recently opened items."""
 
     open_requested = Signal(str)          # an item key
+    local_requested = Signal()
     new_profile_requested = Signal()
     new_ssh_requested = Signal()
     reopen_requested = Signal()
@@ -73,13 +75,18 @@ class HomeView(QWidget):
         # Quick actions.
         actions = QHBoxLayout()
         actions.setSpacing(12)
+        self.local_btn = QPushButton("Local terminal")
+        self.local_btn.setToolTip("Open a shell with no AWS profile or SSH session "
+                                  "(Ctrl+Shift+L)")
+        self.local_btn.clicked.connect(self.local_requested)
+        self.local_btn.setIcon(shell_icon())
         self.new_profile_btn = QPushButton("New profile...")
         self.new_profile_btn.clicked.connect(self.new_profile_requested)
         self.new_ssh_btn = QPushButton("New SSH session...")
         self.new_ssh_btn.clicked.connect(self.new_ssh_requested)
         self.reopen_btn = QPushButton("Reopen previous tabs")
         self.reopen_btn.clicked.connect(self.reopen_requested)
-        for b in (self.new_profile_btn, self.new_ssh_btn, self.reopen_btn):
+        for b in (self.local_btn, self.new_profile_btn, self.new_ssh_btn, self.reopen_btn):
             b.setMinimumHeight(34)
             b.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             actions.addWidget(b)

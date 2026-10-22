@@ -30,6 +30,8 @@ link to support termSwitch development, with status messages next to it.
 
 When no terminals are open, the middle shows the home view:
 
+- **Local terminal** opens a plain shell, as described under
+  [Local terminals](#local-terminals).
 - **New profile...** and **New SSH session...** open the same editors as the toolbar
   and tree menus.
 - **Reopen previous tabs** opens the profiles and SSH sessions that were open in tabs
@@ -247,12 +249,26 @@ Each profile opens in its own tab:
 - Shift+double-click, or Ctrl+Shift+T, opens the profile in Windows Terminal or iTerm2
   instead. Change the default under Settings > Open profiles in.
 
+### Local terminals
+
+**File > New local terminal** (Ctrl+Shift+L, Cmd+Shift+L on macOS), or **Local terminal**
+on the home view, opens a tab with a plain shell that isn't tied to an AWS profile or
+SSH session: PowerShell on Windows, your login shell on macOS. It starts in your home
+folder.
+
+The tab gets the same cleaned environment as every other tab, so AWS keys or an
+`AWS_PROFILE` that termSwitch itself was started with don't carry over. AWS CLI
+commands in it use the CLI's defaults, or whatever your own shell startup files set.
+Right-click the tab to duplicate or rename it. **Reopen previous tabs** brings local
+tabs back too.
+
 ### Keyboard shortcuts
 
 | Action | Windows | macOS |
 | --- | --- | --- |
 | Copy | Ctrl+Shift+C, or Ctrl+C with text selected | Cmd+C |
 | Paste | Ctrl+V or Ctrl+Shift+V | Cmd+V |
+| New local terminal | Ctrl+Shift+L | Cmd+Shift+L |
 | Close tab | Ctrl+Shift+W | Cmd+W |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | same |
 | Focus profiles / terminal | Ctrl+1 / Ctrl+2 | same |

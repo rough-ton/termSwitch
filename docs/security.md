@@ -26,6 +26,9 @@ does to protect them, and what it can't protect against. To report a vulnerabili
   `AWS_PROFILE`. The shell is an absolute path:
   - Windows: `pwsh`, or the system PowerShell
   - macOS: your login shell, checked against `/etc/shells`
+- Local terminals (File > New local terminal) get the same scrubbed environment with no
+  `AWS_PROFILE`, so they use the AWS CLI's defaults unless your own shell startup files
+  set something else.
 
 - Executables are resolved to absolute paths. PATH lookups skip relative entries and the
   current directory, so a planted `aws` or `wt` in the working directory is never picked

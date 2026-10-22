@@ -30,6 +30,7 @@ class TabInfo:
     ssh_session: object = None       # SshSession for SSH tabs
     autofill: object = None          # PasswordAutofill for SSH tabs with a saved password
     autofill_factory: object = None
+    local: bool = False              # a plain local shell with no profile or session
 
 
 class TerminalTabs(QStackedWidget):
@@ -142,6 +143,25 @@ class TerminalTabs(QStackedWidget):
             term.set_scheme(self.scheme_for(profile))
             if info and info.options is not None:
                 self._color_tab_text(self._index_of(term), info.options.tab_color)
+
+    def open_local(self, argv: list[str], env: dict[str, str], cwd: str | None = None,
+                   title: str = "Local") -> TerminalWidget:
+        """A tab with a plain local shell, not tied to an AWS profile or SSH session."""
+        term = TerminalWidget(argv, env, cwd=cwd, font=self.font, scrollback=self.scrollback,
+                              confirm_multiline_paste=self.confirm_multiline_paste)
+        if self.scheme_for:
+            term.set_scheme(self.scheme_for(None))
+        info = TabInfo(None, None, term, title, local=True)
+        self._infos[id(term)] = info
+        idx = self.tabs.addTab(term, _color_icon(None), title)
+        self.tabs.setTabToolTip(idx, "Local shell with no AWS profile")
+        term.exited.connect(lambda code, t=term: self._on_exited(t, code))
+        self.setCurrentWidget(self.tabs)
+        self.tabs.setCurrentIndex(idx)
+        term.start()
+        term.setFocus()
+        self.count_changed.emit(self.tabs.count())
+        return term
 
     def open_ssh(self, session, argv: list[str], env: dict[str, str], autofill_factory=None,
                  tooltip: str = ""):
@@ -283,6 +303,9 @@ class TerminalTabs(QStackedWidget):
         live_profile = info.profile is not None and not info.orphaned
         if live_profile:
             menu.addAction("Duplicate tab", lambda: self.open_profile(info.profile, info.options))
+        elif info.local:
+            menu.addAction("Duplicate tab",
+                           lambda: self.open_local(term.argv, term.env, term.cwd))
         if not term.is_alive():
             menu.addAction("Restart", lambda: self._restart(term))
         menu.addAction("Rename tab...", lambda: self._rename(idx))
