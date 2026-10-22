@@ -5,7 +5,6 @@ import json
 import os
 import stat
 import sys
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -412,3 +411,153 @@ def test_main_window_ssh_flow(qapp, tmp_path, monkeypatch):
     assert s.id not in w.ssh_store.sessions and not w.passwords.has(s.id)
     w.close()
     w.deleteLater()
+
+
+# ---- shared folders and two-file undo ---------------------------------------------------
+
+def test_store_undo_and_redo(tmp_path):
+    store = ss.SessionStore(tmp_path / "s.json", tmp_path / "none")
+    store.load()
+    a = sess()
+    store.save(a)
+    assert store.undo_label == "Create SSH session web-01"
+    store.undo()                                           # back to no file at all
+    assert not (tmp_path / "s.json").exists() and not store.sessions
+    store.undo()                                           # redo
+    assert a.id in store.sessions
+    store.set_groups({a.id: "Prod"})
+    (tmp_path / "s.json").write_text((tmp_path / "s.json").read_text() + " ")
+    assert "changed since" in store.undo_blocked()
+
+
+def test_config_host_placement_and_remap(tmp_path):
+    (tmp_path / "sshc").write_text("Host db\n  HostName 10.0.0.9\n")
+    store = ss.SessionStore(tmp_path / "s.json", tmp_path / "sshc")
+    store.load()
+    db = next(iter(store.config_hosts.values()))
+    a = sess(group="Prod/Web")
+    store.save(a)
+    store.set_groups({db.id: "Prod"})
+    again = ss.SessionStore(tmp_path / "s.json", tmp_path / "sshc")
+    again.load()
+    assert next(iter(again.config_hosts.values())).group == "Prod"
+    assert again.groups() == {"Prod", "Prod/Web"}
+    assert again.remap_groups("Prod", "Production") == 2
+    assert again.sessions[a.id].group == "Production/Web"
+    assert next(iter(again.config_hosts.values())).group == "Production"
+    assert "Host db" in (tmp_path / "sshc").read_text()    # ~/.ssh/config untouched
+
+
+@pytest.fixture
+def shared_window(qapp, tmp_path, monkeypatch):
+    from PySide6.QtCore import QSettings
+
+    from termswitch import ui
+    from termswitch.config_store import ProfileStore
+    cfg = tmp_path / "config"
+    cfg.write_text("[profile prod-admin]\nregion = us-west-2\nx_group = Prod\n"
+                   "[profile dev]\nregion = us-west-2\n")
+    settings = QSettings(str(tmp_path / "ui.ini"), QSettings.Format.IniFormat)
+    settings.setValue("check_on_startup", False)
+    monkeypatch.setattr(ui.MainWindow, "run_dependency_check", lambda *a, **k: None)
+    w = ui.MainWindow(store=ProfileStore(cfg, tmp_path / "credentials"), settings=settings)
+    (tmp_path / "sshc").write_text("Host jump\n  HostName 10.1.1.1\n")
+    w.ssh_store = ss.SessionStore(tmp_path / "ssh.json", tmp_path / "sshc")
+    w.passwords = ss.PasswordStore(backend=FakeKeychain())
+    w.reload()
+    yield w
+    w.close()
+    w.deleteLater()
+
+
+def _parent_label(w, name):
+    it = [i for i in w._iter_items() if i.text(0) == name][0]
+    return it.parent().text(0) if it.parent() else None
+
+
+def test_ssh_sessions_share_folders_with_profiles(shared_window):
+    w = shared_window
+    web = sess(name="prod-web", group="Prod")
+    loose = sess(name="scratch")
+    w.ssh_store.save(web)
+    w.ssh_store.save(loose)
+    w.rebuild()
+    assert _parent_label(w, "prod-web") == "Prod" == _parent_label(w, "prod-admin")
+    assert _parent_label(w, "scratch") == "SSH sessions"
+    assert _parent_label(w, "jump") == "~/.ssh/config"
+    prod = [i for i in w._iter_items() if i.text(0) == "Prod"][0]
+    assert [s.name for s in w.ssh_under(prod)] == ["prod-web"]
+    assert [p.name for p in w.profiles_under(prod)] == ["prod-admin"]
+
+
+def test_drag_ssh_sessions_and_config_hosts_into_folders(shared_window):
+    w = shared_window
+    loose = sess(name="scratch")
+    w.ssh_store.save(loose)
+    w.rebuild()
+    jump_id = next(iter(w.ssh_store.config_hosts))
+    w._apply_move([f"ssh:{loose.id}", f"ssh:{jump_id}", "profile:dev"], "Prod")
+    assert w.ssh_store.sessions[loose.id].group == "Prod"
+    assert w.ssh_store.get(jump_id).group == "Prod"
+    assert w.store.profiles["dev"].group == "Prod"
+    assert _parent_label(w, "jump") == "Prod"
+    assert w.act_undo.isEnabled() and "Move 3 item(s) to Prod" in w.act_undo.text()
+    w.undo_config_change()                                 # both files at once
+    assert w.ssh_store.sessions[loose.id].group is None
+    assert w.ssh_store.get(jump_id).group is None
+    assert w.store.profiles["dev"].group is None
+    w.undo_config_change()                                 # and redo
+    assert w.ssh_store.sessions[loose.id].group == "Prod"
+    assert w.store.profiles["dev"].group == "Prod"
+
+
+def test_rename_and_delete_folder_move_ssh_sessions(shared_window, monkeypatch):
+    w = shared_window
+    web = sess(name="prod-web", group="Prod/Web")
+    w.ssh_store.save(web)
+    w.rebuild()
+    monkeypatch.setattr(ui_mod().QInputDialog, "getText", lambda *a, **k: ("Production", True))
+    w.rename_group("Prod")
+    assert w.store.profiles["prod-admin"].group == "Production"
+    assert w.ssh_store.sessions[web.id].group == "Production/Web"
+    w.undo_config_change()
+    assert w.store.profiles["prod-admin"].group == "Prod"
+    assert w.ssh_store.sessions[web.id].group == "Prod/Web"
+    monkeypatch.setattr(ui_mod().QMessageBox, "question",
+                        lambda *a, **k: ui_mod().QMessageBox.StandardButton.Yes)
+    w.delete_group("Prod/Web")
+    assert w.ssh_store.sessions[web.id].group == "Prod"
+
+
+def test_failed_aws_write_rolls_back_ssh_change(shared_window, monkeypatch):
+    from termswitch.config_store import ConfigError
+    w = shared_window
+    web = sess(name="prod-web", group="Prod")
+    w.ssh_store.save(web)
+    w.rebuild()
+
+    def boom(*a, **k):
+        raise ConfigError("disk full")
+    monkeypatch.setattr(w.store, "rename_group", boom)
+    monkeypatch.setattr(ui_mod().QInputDialog, "getText", lambda *a, **k: ("Production", True))
+    monkeypatch.setattr(ui_mod().QMessageBox, "warning", lambda *a, **k: None)
+    w.rename_group("Prod")
+    assert w.ssh_store.sessions[web.id].group == "Prod"     # put back
+
+
+def test_undo_refused_when_sessions_file_changed(shared_window, monkeypatch):
+    w = shared_window
+    loose = sess(name="scratch")
+    w.ssh_store.save(loose)
+    w._apply_move([f"ssh:{loose.id}"], "Prod")
+    w.ssh_store.path.write_text(w.ssh_store.path.read_text() + "\n")
+    shown = []
+    monkeypatch.setattr(ui_mod().QMessageBox, "warning", lambda *a, **k: shown.append(a[2]))
+    w.undo_config_change()
+    assert shown and "changed since" in shown[0]
+    assert w.ssh_store.sessions[loose.id].group == "Prod"
+
+
+def ui_mod():
+    from termswitch import ui
+    return ui

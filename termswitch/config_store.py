@@ -764,6 +764,15 @@ class ProfileStore:
     def can_undo(self) -> bool:
         return self.undo_label is not None and self.undo_file.is_file()
 
+    def undo_blocked(self) -> str | None:
+        """Why the last change can't be undone safely, or None."""
+        if not self.can_undo():
+            return "There is nothing to undo."
+        if _read_text(self.config_file) != self._undo_expected:
+            return ("The config changed outside termSwitch after that change, so it can't "
+                    "be undone safely. Use File > Backups instead.")
+        return None
+
     def undo(self) -> str:
         """Put back the config as it was before the last change. Undoing again
         redoes it. Returns what was undone."""

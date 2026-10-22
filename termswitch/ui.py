@@ -171,7 +171,7 @@ class ProfileTree(QTreeWidget):
     # Which items are being dragged (top-most only).
     def dragged_items(self) -> list[QTreeWidgetItem]:
         selected = [i for i in self.selectedItems()
-                    if i.data(0, ROLE)[0] in (KIND_GROUP, KIND_PROFILE)]
+                    if i.data(0, ROLE)[0] in (KIND_GROUP, KIND_PROFILE, KIND_SSH)]
         chosen = set(id(i) for i in selected)
         result = []
         for item in selected:
@@ -193,13 +193,11 @@ class ProfileTree(QTreeWidget):
             target = None
         else:
             kind, value = item.data(0, ROLE)
-            if kind in SSH_KINDS:
-                return False, None       # SSH sessions are grouped in their editor
             on_item = indicator == QAbstractItemView.DropIndicatorPosition.OnItem
             if on_item and kind == KIND_GROUP:
                 target = value
-            elif kind == KIND_AUTO:
-                target = None  # dropping on an automatic group clears x_group
+            elif kind in (KIND_AUTO, KIND_SSH_ROOT, KIND_SSH_GROUP):
+                target = None  # an automatic or SSH folder: take it out of any folder
             else:
                 parent = item.parent()
                 # A parent that is an automatic group also means "clear x_group".
@@ -889,7 +887,8 @@ class MainWindow(QMainWindow):
             group_items[path] = it
             return it
 
-        for g in sorted(self.store.all_groups(), key=natural_key):
+        # Folders are shared: AWS profiles and SSH sessions can sit in the same one.
+        for g in sorted(self.store.all_groups() | self.ssh_store.groups(), key=natural_key):
             group_item(g)
 
         mode = get_setting(self.settings, "auto_group")
@@ -919,7 +918,7 @@ class MainWindow(QMainWindow):
                         | Qt.ItemFlag.ItemIsDragEnabled)
             self._decorate_profile(it, prof)
 
-        ssh_items = self._build_ssh_items()
+        ssh_items = self._build_ssh_items(group_item)
 
         # Expansion state
         for key, it in ssh_items.items():
@@ -950,63 +949,64 @@ class MainWindow(QMainWindow):
         self._apply_filter(self.filter.text())
         self._show_details()
 
-    def _build_ssh_items(self) -> dict[str, QTreeWidgetItem]:
-        """The "SSH sessions" folder: termSwitch's sessions in their groups, and
-        ~/.ssh/config hosts in their own read-only folder. Returns folders by key."""
+    def _build_ssh_items(self, group_item) -> dict[str, QTreeWidgetItem]:
+        """SSH sessions go in the shared folders (``group_item(path)``). Sessions in no
+        folder go in an "SSH sessions" folder, and ~/.ssh/config hosts not placed in a
+        folder in a read-only "~/.ssh/config" folder inside it. Returns those two
+        folders by key, for expansion state."""
         sessions = self.ssh_store.all()
-        if not sessions:
-            return {}
         folders: dict[str, QTreeWidgetItem] = {}
-        root = QTreeWidgetItem(self.tree.invisibleRootItem(), [SSH_ROOT_LABEL])
-        root.setData(0, ROLE, (KIND_SSH_ROOT, ""))
-        root.setIcon(0, material_icon(PROVIDER_ICONS["ssh"]))
-        root.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-        f = root.font(0)
-        f.setBold(True)
-        root.setFont(0, f)
-        folders[item_key(KIND_SSH_ROOT, "")] = root
 
-        def folder(path: str) -> QTreeWidgetItem:
-            key = item_key(KIND_SSH_GROUP, path)
-            if key in folders:
-                return folders[key]
-            parent = folder(parent_group(path)) if parent_group(path) else root
-            it = QTreeWidgetItem(parent, [leaf_name(path)])
-            it.setData(0, ROLE, (KIND_SSH_GROUP, path))
-            it.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-            it.setIcon(0, material_icon("folder-base"))
-            folders[key] = it
-            return it
+        def root() -> QTreeWidgetItem:
+            key = item_key(KIND_SSH_ROOT, "")
+            if key not in folders:
+                it = QTreeWidgetItem(self.tree.invisibleRootItem(), [SSH_ROOT_LABEL])
+                it.setData(0, ROLE, (KIND_SSH_ROOT, ""))
+                it.setIcon(0, material_icon(PROVIDER_ICONS["ssh"]))
+                it.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+                            | Qt.ItemFlag.ItemIsDropEnabled)
+                f = it.font(0)
+                f.setItalic(True)
+                it.setFont(0, f)
+                it.setForeground(0, QBrush(QColor(theme.colors().hint)))
+                it.setToolTip(0, "SSH sessions that aren't in a folder.\nDrag one onto a "
+                                 "folder to move it there.")
+                folders[key] = it
+            return folders[key]
 
         def config_folder() -> QTreeWidgetItem:
             # One folder, not a path: its name contains "/".
             key = item_key(KIND_SSH_GROUP, SSH_CONFIG_KEY)
             if key not in folders:
-                it = QTreeWidgetItem(root, ["~/.ssh/config"])
+                it = QTreeWidgetItem(root(), ["~/.ssh/config"])
                 it.setData(0, ROLE, (KIND_SSH_GROUP, SSH_CONFIG_KEY))
-                it.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                it.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+                            | Qt.ItemFlag.ItemIsDropEnabled)
                 it.setIcon(0, material_icon("folder-config"))
                 fi = it.font(0)
                 fi.setItalic(True)
                 it.setFont(0, fi)
                 it.setForeground(0, QBrush(QColor(theme.colors().hint)))
-                it.setToolTip(0, "Hosts from ~/.ssh/config (read-only)")
+                it.setToolTip(0, "Hosts from ~/.ssh/config (read-only). Drag one onto a "
+                                 "folder to show it there.")
                 folders[key] = it
             return folders[key]
 
-        for s in sorted(sessions, key=lambda s: (s.from_ssh_config, natural_key(s.display_group),
-                                                  natural_key(s.name))):
-            if s.from_ssh_config:
+        for s in sorted(sessions, key=lambda s: (s.from_ssh_config, natural_key(s.name))):
+            if s.group:
+                parent = group_item(s.group)
+            elif s.from_ssh_config:
                 parent = config_folder()
             else:
-                parent = folder(s.group) if s.group else root
+                parent = root()
             it = QTreeWidgetItem(parent, [s.name])
             it.setData(0, ROLE, (KIND_SSH, s.id))
-            it.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            it.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+                        | Qt.ItemFlag.ItemIsDragEnabled)
             it.setIcon(0, material_icon(PROVIDER_ICONS["ssh"], dot=s.color,
                                         corner=PROVIDER_DOT_CORNER))
             port = f":{s.port}" if s.port != 22 else ""
-            tip = [s.name, f"{s.destination}{port}"]
+            tip = [s.name, f"SSH {s.destination}{port}"]
             if s.jump:
                 tip.append(f"Through {s.jump}")
             if s.from_ssh_config:
@@ -1401,6 +1401,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Could not write config", str(exc))
             self.reload()
             return False
+        self._undo_parts, self._undo_label = {"aws"}, self.store.undo_label
         self._watch()
         self.rebuild()
         self._update_left_view()
@@ -1409,6 +1410,7 @@ class MainWindow(QMainWindow):
 
     def _apply_move(self, keys: list[str], target: str | None):
         profile_targets: dict[str, str | None] = {}
+        ssh_targets: dict[str, str | None] = {}
         group_moves: list[tuple[str, str | None]] = []
         for key in keys:
             kind, value = key.split(":", 1)
@@ -1416,22 +1418,80 @@ class MainWindow(QMainWindow):
                 prof = self.store.profiles.get(value)
                 if prof and prof.group != target:
                     profile_targets[value] = target
+            elif kind == KIND_SSH:
+                s = self.ssh_store.get(value)
+                if s and s.group != target:
+                    ssh_targets[value] = target
             elif kind == KIND_GROUP:
                 new = join_group(target, leaf_name(value))
                 if new != value:
                     group_moves.append((value, new))
-        if not profile_targets and not group_moves:
+        if not profile_targets and not group_moves and not ssh_targets:
+            return
+
+        def ssh_change():
+            for old, new in group_moves:
+                self.ssh_store.remap_groups(old, new)
+            if ssh_targets:
+                self.ssh_store.set_groups(ssh_targets)
+
+        aws_change = ((self.store.move, profile_targets, group_moves)
+                      if profile_targets or group_moves else None)
+        n = len(profile_targets) + len(group_moves) + len(ssh_targets)
+        where = target or "the top level"
+        if not self._change_both(f"Move {n} item(s) to {where}", ssh_change, aws_change):
             return
         for old, new in group_moves:
             self._remap_expanded(old, new)
-        if self._write(self.store.move, profile_targets, group_moves):
-            if target:
-                self.expanded.add(item_key(KIND_GROUP, target))
-                self._save_expanded()
-                self.rebuild()
-            n = len(profile_targets) + len(group_moves)
-            where = target or "the top level"
-            self.statusBar().showMessage(f"Moved {n} item(s) to {where}.", 4000)
+        if target:
+            self.expanded.add(item_key(KIND_GROUP, target))
+            self._save_expanded()
+            self.rebuild()
+        self.statusBar().showMessage(f"Moved {n} item(s) to {where}.", 4000)
+
+    # ---- changes to the AWS config and the SSH sessions file together -----
+
+    def _change_both(self, label: str, ssh_change=None, aws_change=None) -> bool:
+        """Apply a change that may touch the SSH sessions file and the AWS config.
+        The SSH part goes first; if the AWS part then fails, the SSH part is put
+        back. Undo then reverses both."""
+        if self.store.file_changed_on_disk():
+            self.reload()
+        ssh_before = self.ssh_store.undo_label, self.ssh_store._undo_text, self.ssh_store._undo_expected
+        ssh_done = False
+        try:
+            if ssh_change is not None:
+                text_before = self.ssh_store._read_text()
+                ssh_change()
+                ssh_done = self.ssh_store._read_text() != text_before
+            if aws_change is not None:
+                aws_change[0](*aws_change[1:])
+        except (ConfigError, SessionError, OSError) as exc:
+            if ssh_done:
+                try:
+                    self.ssh_store.undo()
+                except (SessionError, OSError):
+                    pass
+                (self.ssh_store.undo_label, self.ssh_store._undo_text,
+                 self.ssh_store._undo_expected) = ssh_before
+            QMessageBox.warning(self, "Could not save the change", str(exc))
+            self.reload()
+            return False
+        parts = set()
+        if ssh_done:
+            parts.add("ssh")
+        if aws_change is not None:
+            parts.add("aws")
+        if parts:
+            self._undo_parts, self._undo_label = parts, label
+        self._watch()
+        self.rebuild()
+        self._update_left_view()
+        self._sync_undo()
+        return True
+
+    def _ssh_write(self, label: str, fn, *args) -> bool:
+        return self._change_both(label, ssh_change=lambda: fn(*args))
 
     def _remap_expanded(self, old: str, new: str | None):
         updated = set()
@@ -1475,20 +1535,29 @@ class MainWindow(QMainWindow):
                                     "Use drag and drop to move a group. Names cannot contain '/'.")
             return
         new = join_group(parent_group(path), name)
-        self._remap_expanded(path, new)
-        self._write(self.store.rename_group, path, new)
+        if self._change_both(f"Rename folder {leaf_name(path)} to {name}",
+                             lambda: self.ssh_store.remap_groups(path, new),
+                             (self.store.rename_group, path, new)):
+            self._remap_expanded(path, new)
+            self.rebuild()
 
     def delete_group(self, path: str):
         count = len(self.store.profiles_in(path))
+        ssh_count = sum(1 for s in self.ssh_store.all() if is_within(s.group, path))
         parent = parent_group(path)
         dest = f"'{parent}'" if parent else "their automatic groups"
         msg = f"Delete group '{path}'?"
         if count:
             msg += f"\n\nIts {count} profile(s) and subgroups move to {dest}."
+        if ssh_count:
+            msg += (f"\n\nIts {ssh_count} SSH session(s) move to "
+                    f"{repr(parent) if parent else 'SSH sessions'}.")
         if QMessageBox.question(self, "Delete group", msg) != QMessageBox.StandardButton.Yes:
             return
-        self._remap_expanded(path, parent)
-        self._write(self.store.delete_group, path)
+        if self._change_both(f"Delete folder {leaf_name(path)}",
+                             lambda: self.ssh_store.remap_groups(path, parent),
+                             (self.store.delete_group, path)):
+            self._remap_expanded(path, parent)
 
     def remove_from_group(self, profiles: list[Profile]):
         targets = {p.name: None for p in profiles if p.group}
@@ -1721,17 +1790,48 @@ class MainWindow(QMainWindow):
             self.tree.scrollToItem(it)
             return
 
+    def _can_undo(self) -> bool:
+        parts = getattr(self, "_undo_parts", set())
+        if not parts:
+            return False
+        return (("aws" not in parts or self.store.can_undo())
+                and ("ssh" not in parts or self.ssh_store.can_undo()))
+
     def _sync_undo(self):
-        can = self.store.can_undo()
+        can = self._can_undo()
         self.act_undo.setEnabled(can)
-        self.act_undo.setText(f"Undo {self.store.undo_label}" if can else "Undo")
+        self.act_undo.setText(f"Undo {self._undo_label}" if can else "Undo")
 
     def undo_config_change(self):
-        if not self.store.can_undo():
+        """Undo the last change, to the AWS config, the SSH sessions file, or both.
+        Undoing again redoes it."""
+        if not self._can_undo():
             return
-        label = self.store.undo_label
-        if self._write(self.store.undo):
-            self.statusBar().showMessage(f"Undid: {label}", 5000)
+        parts, label = self._undo_parts, self._undo_label
+        problems = [p for p in (
+            self.store.undo_blocked() if "aws" in parts else None,
+            self.ssh_store.undo_blocked() if "ssh" in parts else None) if p]
+        if problems:
+            QMessageBox.warning(self, "Undo", "\n\n".join(problems))
+            return
+        try:
+            if "ssh" in parts:
+                self.ssh_store.undo()
+            if "aws" in parts:
+                try:
+                    self.store.undo()
+                except (ConfigError, OSError):
+                    if "ssh" in parts:
+                        self.ssh_store.undo()          # put the SSH part back as it was
+                    raise
+        except (ConfigError, SessionError, OSError) as exc:
+            QMessageBox.warning(self, "Undo", str(exc))
+            self.reload()
+            return
+        self._undo_label = label[6:] if label.startswith("Undo: ") else f"Undo: {label}"
+        self.reload()
+        self._sync_undo()
+        self.statusBar().showMessage(f"Undid: {label}", 5000)
 
     # ---- SSO sessions and setup ------------------------------------------
 
@@ -1849,6 +1949,7 @@ class MainWindow(QMainWindow):
         except (ConfigError, OSError) as exc:
             QMessageBox.warning(self, "Reset config", str(exc))
             return
+        self._undo_parts, self._undo_label = {"aws"}, self.store.undo_label
         self.status.clear()
         self.rebuild()
         self._update_left_view()
@@ -1923,7 +2024,9 @@ class MainWindow(QMainWindow):
         return make
 
     def new_ssh_session(self, group: str | None = None):
-        dlg = SshSessionDialog(self.ssh_store, self.passwords, group=group, parent=self)
+        dlg = SshSessionDialog(self.ssh_store, self.passwords, group=group,
+                               folders=self.store.all_groups() | self.ssh_store.groups(),
+                               parent=self)
         if dlg.exec():
             self._save_ssh(dlg)
 
@@ -1934,7 +2037,9 @@ class MainWindow(QMainWindow):
                 f"'{session.name}' comes from ~/.ssh/config, which termSwitch doesn't change. "
                 "Edit that file, or use Duplicate to make a termSwitch session from it.")
             return
-        dlg = SshSessionDialog(self.ssh_store, self.passwords, session=session, parent=self)
+        dlg = SshSessionDialog(self.ssh_store, self.passwords, session=session,
+                               folders=self.store.all_groups() | self.ssh_store.groups(),
+                               parent=self)
         if dlg.exec():
             self._save_ssh(dlg)
 
@@ -1944,9 +2049,6 @@ class MainWindow(QMainWindow):
             # Password store first: if it fails, nothing claims a password is saved.
             if dlg.password_action == PW_SET:
                 self.passwords.set(session.id, dlg.take_password())
-            self.ssh_store.save(session)
-            if dlg.password_action == PW_DELETE:
-                self.passwords.delete(session.id)
         except (SessionError, OSError) as exc:
             QMessageBox.warning(self, "SSH session", str(exc))
             return
@@ -1954,12 +2056,19 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "SSH session",
                                 f"The {self.passwords.store_name()} refused the password: {exc}")
             return
+        label = (f"Edit SSH session {session.name}" if session.id in self.ssh_store.sessions
+                 else f"Create SSH session {session.name}")
+        if not self._ssh_write(label, self.ssh_store.save, session):
+            return
+        if dlg.password_action == PW_DELETE:
+            self.passwords.delete(session.id)
         if session.group:
-            self.expanded.add(item_key(KIND_SSH_GROUP, session.group))
+            from .config_store import ancestors
+            for anc in ancestors(session.group):
+                self.expanded.add(item_key(KIND_GROUP, anc))
         self.expanded.add(item_key(KIND_SSH_ROOT, ""))
         self._save_expanded()
         self.rebuild()
-        self._update_left_view()
         self._select_ssh(session.id)
         self.statusBar().showMessage(f"Saved SSH session {session.name}.", 4000)
 
@@ -1969,12 +2078,11 @@ class MainWindow(QMainWindow):
         name = name.strip() if ok else ""
         if not name:
             return
-        try:
-            copy = self.ssh_store.duplicate(session, name)
-        except (SessionError, OSError) as exc:
-            QMessageBox.warning(self, "Duplicate SSH session", str(exc))
+        made = []
+        if not self._ssh_write(f"Duplicate SSH session {session.name}",
+                               lambda: made.append(self.ssh_store.duplicate(session, name))):
             return
-        self.rebuild()
+        copy = made[0]
         self._select_ssh(copy.id)
         self.edit_ssh(copy)
 
@@ -1996,24 +2104,19 @@ class MainWindow(QMainWindow):
         box.exec()
         if box.clickedButton() is not delete:
             return
-        for s in own:
-            try:
-                self.ssh_store.delete(s.id)
-            except (SessionError, OSError) as exc:
-                QMessageBox.warning(self, "Delete SSH session", str(exc))
-                break
-            self.passwords.delete(s.id)
-        self.rebuild()
-        self._update_left_view()
+        label = (f"Delete SSH session {own[0].name}" if len(own) == 1
+                 else f"Delete {len(own)} SSH sessions")
+        if self._ssh_write(label, self.ssh_store.delete_many, [s.id for s in own]):
+            # Saved passwords go now. Undo brings a session back, but not its password,
+            # so it asks for the password in the tab until one is saved again.
+            for s in own:
+                self.passwords.delete(s.id)
 
     def forget_ssh_password(self, session: SshSession):
         from dataclasses import replace as _replace
         self.passwords.delete(session.id)
-        try:
-            self.ssh_store.save(_replace(session, remember_password=False))
-        except (SessionError, OSError) as exc:
-            QMessageBox.warning(self, "Forget password", str(exc))
-        self.rebuild()
+        self._ssh_write(f"Forget password for {session.name}", self.ssh_store.save,
+                        _replace(session, remember_password=False))
         self.statusBar().showMessage(f"Forgot the saved password for {session.name}.", 4000)
 
     def _select_ssh(self, session_id: str):
@@ -2099,8 +2202,7 @@ class MainWindow(QMainWindow):
                 menu.addAction(f"Connect all {len(under)}",
                                lambda: [self.connect_ssh(s) for s in under])
                 menu.addSeparator()
-            group = value if kind == KIND_SSH_GROUP and value != SSH_CONFIG_KEY else None
-            menu.addAction("New SSH session...", lambda: self.new_ssh_session(group))
+            menu.addAction("New SSH session...", lambda: self.new_ssh_session(None))
             menu.exec(self.tree.viewport().mapToGlobal(pos))
             return
 
@@ -2149,14 +2251,19 @@ class MainWindow(QMainWindow):
                 menu.addAction("Remove from group", lambda: self.remove_from_group(profiles))
         elif kind == KIND_GROUP:
             under = self.profiles_under(item)
+            ssh_under = self.ssh_under(item)
+            total = len(under) + len(ssh_under)
+            if total:
+                menu.addAction(f"Open all {total} terminals",
+                               lambda: (self.open_profiles(under) if under else None,
+                                        [self.connect_ssh(s) for s in ssh_under]))
             if under:
-                menu.addAction(f"Open all {len(under)} terminals",
-                               lambda: self.open_profiles(under))
                 menu.addAction("Check status of group", lambda: self.check_profiles(under))
                 if any(p.is_sso for p in under):
                     menu.addAction("SSO login for group", lambda: self.login_profiles(under))
                 menu.addSeparator()
             menu.addAction("New profile here...", lambda: self.new_profile(group=value))
+            menu.addAction("New SSH session here...", lambda: self.new_ssh_session(value))
             menu.addAction("New subgroup...", lambda: self.new_group(value))
             menu.addAction("Rename...", lambda: self.rename_group(value))
             menu.addAction("Delete group", lambda: self.delete_group(value))

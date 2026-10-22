@@ -95,9 +95,9 @@ class SshSession:
 
     @property
     def display_group(self) -> str:
-        if self.from_ssh_config:
-            return SSH_CONFIG_GROUP
-        return self.group or ""
+        if self.group:
+            return self.group
+        return SSH_CONFIG_GROUP if self.from_ssh_config else ""
 
     def to_json(self) -> dict:
         data = asdict(self)
@@ -227,13 +227,21 @@ class SessionStore:
         self.ssh_config = Path(ssh_config) if ssh_config else Path.home() / ".ssh" / "config"
         self.sessions: dict[str, SshSession] = {}
         self.config_hosts: dict[str, SshSession] = {}
+        # Folders chosen for ~/.ssh/config hosts (alias -> folder), kept here because
+        # termSwitch never writes ~/.ssh/config.
+        self.placements: dict[str, str] = {}
         self.warnings: list[str] = []
+        # One step of undo: the file text before the last change, and after it.
+        self.undo_label: str | None = None
+        self._undo_text: str | None = None
+        self._undo_expected: str | None = None
 
     # ---- reading ---------------------------------------------------------
 
     def load(self) -> None:
         self.warnings = []
         self.sessions = {}
+        self.placements = {}
         if self.path.exists():
             try:
                 _check_private(self.path)
@@ -242,6 +250,12 @@ class SessionStore:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
                 if not isinstance(data, dict) or data.get("format") != FILE_FORMAT:
                     raise SessionError("Not a termSwitch sessions file.")
+                raw_places = data.get("config_host_groups") or {}
+                if isinstance(raw_places, dict):
+                    for alias, group in list(raw_places.items())[:MAX_SESSIONS]:
+                        g = normalize_group(str(group)) if isinstance(group, str) else None
+                        if g and g == group and _HOST.match(str(alias)):
+                            self.placements[str(alias)] = g
                 for raw in data.get("sessions", [])[:MAX_SESSIONS]:
                     try:
                         s = _from_json(raw)
@@ -254,6 +268,7 @@ class SessionStore:
                 self.warnings.append(f"Could not read {self.path}: {exc}")
         self.config_hosts = {}
         for s in read_ssh_config_hosts(self.ssh_config):
+            s.group = self.placements.get(s.name)
             self.config_hosts[s.id] = s
 
     def all(self) -> list[SshSession]:
@@ -263,13 +278,51 @@ class SessionStore:
         return self.sessions.get(session_id) or self.config_hosts.get(session_id)
 
     def groups(self) -> set[str]:
+        """Folders that have SSH sessions or placed ~/.ssh/config hosts in them."""
         from .config_store import ancestors
         found: set[str] = set()
-        for s in self.sessions.values():
+        for s in self.all():
             found.update(ancestors(s.group))
         return found
 
     # ---- writing ---------------------------------------------------------
+
+    def set_groups(self, assignments: dict[str, str | None], label: str = "Move SSH sessions") -> None:
+        """Put sessions (by id) in folders; None takes them out of any folder. Works for
+        ~/.ssh/config hosts too, whose folder is remembered here."""
+        sessions = dict(self.sessions)
+        placements = dict(self.placements)
+        for sid, group in assignments.items():
+            group = normalize_group(group)
+            if sid in sessions:
+                updated = replace(sessions[sid], group=group)
+                validate(updated)
+                sessions[sid] = updated
+            elif sid in self.config_hosts:
+                alias = self.config_hosts[sid].name
+                if group:
+                    placements[alias] = group
+                else:
+                    placements.pop(alias, None)
+            else:
+                raise SessionError("That session no longer exists.")
+        self._write(sessions, placements, label)
+        self.sessions, self.placements = sessions, placements
+        for s in self.config_hosts.values():
+            s.group = placements.get(s.name)
+
+    def remap_groups(self, old: str, new: str | None, label: str = "Move folder") -> int:
+        """Move everything in folder ``old`` (and below) to ``new`` (None: out of any
+        folder), as when a folder is renamed, moved or deleted. Returns the count."""
+        from .config_store import remap
+        changes = {}
+        for s in self.all():
+            moved = remap(s.group, old, new)
+            if moved != s.group:
+                changes[s.id] = moved
+        if changes:
+            self.set_groups(changes, label)
+        return len(changes)
 
     def save(self, session: SshSession) -> None:
         if session.from_ssh_config:
@@ -282,14 +335,27 @@ class SessionStore:
         if session.name in names:
             raise SessionError(f"A session named '{session.name}' already exists.")
         updated = {**self.sessions, session.id: session}
-        self._write(updated)
+        label = (f"Edit SSH session {session.name}" if session.id in self.sessions
+                 else f"Create SSH session {session.name}")
+        self._write(updated, self.placements, label)
         self.sessions = updated
 
     def delete(self, session_id: str) -> None:
         if session_id not in self.sessions:
             raise SessionError("That session no longer exists.")
+        name = self.sessions[session_id].name
         updated = {k: v for k, v in self.sessions.items() if k != session_id}
-        self._write(updated)
+        self._write(updated, self.placements, f"Delete SSH session {name}")
+        self.sessions = updated
+
+    def delete_many(self, session_ids: list[str]) -> None:
+        missing = [sid for sid in session_ids if sid not in self.sessions]
+        if missing:
+            raise SessionError("A session no longer exists.")
+        updated = {k: v for k, v in self.sessions.items() if k not in set(session_ids)}
+        label = (f"Delete SSH session {self.sessions[session_ids[0]].name}"
+                 if len(session_ids) == 1 else f"Delete {len(session_ids)} SSH sessions")
+        self._write(updated, self.placements, label)
         self.sessions = updated
 
     def duplicate(self, session: SshSession, name: str) -> SshSession:
@@ -300,11 +366,59 @@ class SessionStore:
         self.save(copy)
         return copy
 
-    def _write(self, sessions: dict[str, SshSession]) -> None:
+    def _text(self, sessions: dict[str, SshSession], placements: dict[str, str]) -> str:
         data = {"format": FILE_FORMAT, "version": FILE_VERSION,
                 "sessions": [s.to_json() for s in sorted(sessions.values(),
                                                           key=lambda s: s.name.lower())]}
-        text = json.dumps(data, indent=2) + "\n"
+        if placements:
+            data["config_host_groups"] = dict(sorted(placements.items()))
+        return json.dumps(data, indent=2) + "\n"
+
+    def _read_text(self) -> str:
+        try:
+            return self.path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return ""
+
+    # ---- undo ----------------------------------------------------------------
+
+    def can_undo(self) -> bool:
+        return self.undo_label is not None and self._undo_text is not None
+
+    def undo_blocked(self) -> str | None:
+        """Why the last change can't be undone safely, or None."""
+        if not self.can_undo():
+            return "There is nothing to undo."
+        if self._read_text() != self._undo_expected:
+            return "The SSH sessions file changed since, so it can't be undone safely."
+        return None
+
+    def undo(self) -> str:
+        """Put the sessions file back as it was before the last change. Undoing
+        again redoes it. Returns what was undone."""
+        problem = self.undo_blocked()
+        if problem:
+            raise SessionError(problem)
+        label = self.undo_label
+        before = self._undo_text
+        self._write_text(before, f"Undo: {label}" if not label.startswith("Undo: ") else label[6:])
+        self.load()
+        return label
+
+    def _write(self, sessions: dict[str, SshSession], placements: dict[str, str] | None = None,
+               label: str = "Change SSH sessions") -> None:
+        text = self._text(sessions, self.placements if placements is None else placements)
+        self._write_text(text, label)
+
+    def _write_text(self, text: str, label: str) -> None:
+        before = self._read_text()
+        if not text:
+            # Undoing the very first save: the file didn't exist before.
+            if self.path.exists():
+                _check_private(self.path)
+                self.path.unlink()
+            self.undo_label, self._undo_text, self._undo_expected = label, before, text
+            return
         folder = self.path.parent
         if not folder.exists():
             folder.mkdir(mode=0o700, parents=True)
@@ -324,6 +438,7 @@ class SessionStore:
             except OSError:
                 pass
             raise
+        self.undo_label, self._undo_text, self._undo_expected = label, before, text
 
 
 def _from_json(raw: dict) -> SshSession:

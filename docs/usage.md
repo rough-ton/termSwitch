@@ -145,9 +145,12 @@ duplicated.
 **Production profiles** (matching the production pattern in Settings) need a second
 confirmation to rename or delete: type the profile name.
 
-**Undo** reverses the last change to the config, including deletes, renames, restores
-and resets. Undoing again redoes it. If the file was changed outside termSwitch since,
-undo is refused; use **File > Backups** instead.
+**Undo** reverses the last change to the config or your SSH sessions, including
+deletes, renames, moves, restores and resets. A change that touched both, such as
+renaming a folder with AWS profiles and SSH sessions in it, is undone in one step.
+Undoing again redoes it. If either file was changed outside termSwitch since, undo is
+refused; use **File > Backups** for the AWS config. Undoing an SSH session delete
+brings the session back, but not a saved password.
 
 ## Managing the config file
 
@@ -175,12 +178,20 @@ termSwitch can also open saved SSH connections in terminal tabs. They're listed 
 tree under **SSH sessions**, with a teal terminal icon.
 
 - **Where sessions come from:**
-  - Sessions you create in termSwitch (Profiles > **New SSH session**, or right-click
-    the SSH folder), in your own groups.
-  - The `Host` entries in `~/.ssh/config`, in a read-only **~/.ssh/config** folder.
-    Wildcard entries are skipped and `Include` files are followed. termSwitch never
-    changes that file; connecting runs `ssh <alias>`, so all your settings there apply.
-    Use **Duplicate** to turn one into an editable termSwitch session.
+  - Sessions you create in termSwitch (Profiles > **New SSH session**, or right-click a
+    folder > **New SSH session here**).
+  - The `Host` entries in `~/.ssh/config`. Wildcard entries are skipped and `Include`
+    files are followed. termSwitch never changes that file; connecting runs
+    `ssh <alias>`, so all your settings there apply. Use **Duplicate** to turn one into
+    an editable termSwitch session.
+- **Folders are shared with AWS profiles.** A Prod folder can hold your prod AWS
+  profiles and your prod SSH sessions side by side. Drag an SSH session onto a folder,
+  or pick the folder in the session editor. Hosts from `~/.ssh/config` can be dragged
+  into folders too; termSwitch remembers where you put them in its own sessions file.
+  Sessions in no folder are listed under **SSH sessions**, and `~/.ssh/config` hosts
+  you haven't placed under **SSH sessions > ~/.ssh/config**. Renaming, moving or
+  deleting a folder carries its SSH sessions along, and **Open all** on a folder opens
+  its AWS profiles and SSH sessions together.
 - **Connecting:** double-click, Enter, or right-click > **Connect**. termSwitch runs your
   system's OpenSSH client (`ssh`), so host key checks, `known_hosts`, agents and
   `~/.ssh/config` work exactly as they do in any terminal. The first time you connect to

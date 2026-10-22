@@ -23,7 +23,8 @@ class SshSessionDialog(QDialog):
     password store. The caller saves both."""
 
     def __init__(self, store: SessionStore, passwords: PasswordStore,
-                 session: SshSession | None = None, group: str | None = None, parent=None):
+                 session: SshSession | None = None, group: str | None = None,
+                 folders: set[str] | None = None, parent=None):
         super().__init__(parent)
         self.store = store
         self.passwords = passwords
@@ -42,10 +43,13 @@ class SshSessionDialog(QDialog):
         form.addRow("Name:", self.name)
         self.group = QComboBox()
         self.group.setEditable(True)
-        self.group.addItems([""] + sorted(store.groups(), key=natural_key))
+        # Folders are shared with AWS profiles.
+        self.group.addItems([""] + sorted(folders if folders is not None else store.groups(),
+                                          key=natural_key))
         self.group.setCurrentText(s.group or "")
-        self.group.setToolTip("Use / for nested groups, for example Homelab/Servers")
-        form.addRow("Group:", self.group)
+        self.group.setToolTip("The same folders as your AWS profiles. Use / for nested "
+                              "folders, for example Prod/Web")
+        form.addRow("Folder:", self.group)
 
         self.host = QLineEdit(s.host)
         self.host.setPlaceholderText("host name or IP address")

@@ -101,7 +101,12 @@ does to protect them, and what it can't protect against. To report a vulnerabili
   atomically. It holds key and certificate paths, never keys or passwords. Entries
   that fail validation are skipped.
 - **`~/.ssh/config`** is read, never written. Only `Include` files inside your home
-  folder are followed.
+  folder are followed. The folders you place its hosts in are remembered in the
+  sessions file.
+- **Changes to both files** (for example renaming a folder that has AWS profiles and SSH
+  sessions) write the sessions file first, then the AWS config; if the config write
+  fails, the sessions file is put back. Undo reverses both, and is refused if either
+  file changed outside termSwitch since.
 - **Saved passwords:**
   - Stored only in the macOS Keychain or Windows Credential Manager, through `keyring`.
     termSwitch refuses any other keyring backend (for example plain-text ones), so on
