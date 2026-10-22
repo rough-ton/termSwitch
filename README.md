@@ -50,25 +50,42 @@ Get the latest build from the
 | Windows 10/11 (x64) | `termSwitch-windows-x64.exe`: a single file, no installer |
 | macOS 12+ (Apple Silicon) | `termSwitch-macos-arm64.dmg`: drag termSwitch to Applications |
 
-Each release includes `SHA256SUMS.txt` for verifying downloads. The builds are not
-code-signed yet, so Windows SmartScreen and macOS Gatekeeper warn on first launch.
+Each release includes `SHA256SUMS.txt` for verifying downloads. Code signing is on the
+way for Windows (see [Code signing policy](#code-signing-policy)); until then, and on
+macOS, the system warns the first time you open termSwitch.
 
 <details>
-<summary>Verifying a download and getting past the first-launch warning</summary>
+<summary>Opening termSwitch the first time, and verifying a download</summary>
+
+**Windows:** in the "Windows protected your PC" prompt, click **More info**, then
+**Run anyway**.
+
+**macOS 15 (Sequoia) and later:** open termSwitch once and close the warning. Then go to
+**System Settings > Privacy & Security**, scroll to Security, click **Open Anyway** next
+to the termSwitch message, and confirm with your password. The button shows for about an
+hour after the warning.
+
+**macOS 12 to 14:** right-click termSwitch in Applications, choose **Open**, then
+**Open** again.
+
+**Any macOS version, from Terminal:** after dragging termSwitch to Applications, clear
+the download flag instead:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/termSwitch.app
+```
+
+**Verify a download** against `SHA256SUMS.txt` from the same release:
 
 ```powershell
-# Windows: compare with SHA256SUMS.txt
+# Windows
 (Get-FileHash .\termSwitch-windows-x64.exe -Algorithm SHA256).Hash
 ```
 
 ```bash
-# macOS: compare with SHA256SUMS.txt, then clear the quarantine flag
+# macOS
 shasum -a 256 termSwitch-macos-arm64.dmg
-xattr -dr com.apple.quarantine /Applications/termSwitch.app
 ```
-
-On Windows, click **More info > Run anyway** in the SmartScreen prompt. On macOS, you can
-also right-click the app and choose **Open**.
 
 </details>
 
@@ -97,6 +114,14 @@ before launching. Running from source is covered in [Development](docs/developme
 Issues and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md)
 first. To report a security problem, follow [SECURITY.md](SECURITY.md) instead of
 opening a public issue.
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by
+[SignPath Foundation](https://signpath.org/). termSwitch is applying to this program for
+its Windows downloads; macOS downloads are not signed. What is signed, by whom, how it's
+approved, and what termSwitch connects to are in the
+[code signing policy](docs/code-signing-policy.md).
 
 ## Credits
 
