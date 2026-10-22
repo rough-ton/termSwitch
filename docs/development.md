@@ -119,6 +119,8 @@ termswitch/
   assets/          app icon in SVG, PNG, ICO, ICNS; icons/material/ (MIT)
   icons.py         Material Icon Theme icons for groups, tabs and the toolbar
   legal.py         Help > Licenses viewer for the license and third-party notices
+  about.py         Help > About dialog and system information
+  links.py         every web address the app links to (website, GitHub, releases)
 tests/
 tools/build_icons.py
 .github/workflows/ ci.yml (tests), release.yml (builds and publishes downloads)

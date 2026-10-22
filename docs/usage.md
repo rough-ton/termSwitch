@@ -11,6 +11,7 @@
 - [Run safety](#run-safety)
 - [Collapsing the Commands pane](#collapsing-the-commands-pane)
 - [Credential status and SSO](#credential-status-and-sso)
+- [About termSwitch](#about-termswitch)
 
 ## The main window
 
@@ -242,3 +243,22 @@ version:
   on that SSO session.
 - **Production safeguards.** Profiles that match a pattern (`prod` by default) show in
   red and get a red tab color. By default, termSwitch asks before opening one.
+
+## About termSwitch
+
+![The About dialog](images/about.png)
+
+**Help > About** (in the termSwitch menu on macOS) shows the version and, for
+downloaded builds, the commit it was built from. Source checkouts show the base version
+followed by "(source)".
+
+- **Links:** the project website, the GitHub repository, the release notes for the
+  version you're running, a pre-filled bug report with your version and OS, and the
+  licenses.
+- **Update status:** downloaded builds check for a newer release in the background,
+  unless Settings turns off checking for newer versions. Nothing is shown when the
+  check can't reach GitHub.
+- **System information:** versions of termSwitch, the OS, Python, Qt, PySide6 and the
+  AWS CLI, the terminal backend and the config file path. **Copy** puts it on the
+  clipboard for a bug report. It never includes profile names, account IDs, ARNs or
+  credentials.

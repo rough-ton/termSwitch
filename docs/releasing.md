@@ -20,9 +20,9 @@ builds pass their smoke tests, the workflow:
   release adds features, for example `0.6.0` to `0.7.0`.
 - The patch number is automatic: one more than the highest `vMAJOR.MINOR.*` tag
   (`tools/next_version.py`). The first merge after a bump releases `vMAJOR.MINOR.0`.
-- The release build stamps the exact version into the app (`termswitch/_version.py`,
-  not committed), so About, `--version` and the in-app update check match the release.
-  Source checkouts report `BASE_VERSION`.
+- The release build stamps the exact version and the short commit into the app
+  (`termswitch/_version.py`, not committed), so About, `--version` and the in-app update
+  check match the release. Source checkouts report `BASE_VERSION (source)` in About.
 - Releases run one at a time, so two quick merges never get the same number.
 - Don't push `v*` tags by hand. The workflow creates them.
 

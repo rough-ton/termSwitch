@@ -67,8 +67,11 @@ jobs:
       - name: Stamp the release version
         shell: bash
         run: |
-          echo "__version__ = \"${{ needs.version.outputs.version }}\"" > termswitch/_version.py
-          python -c "import termswitch; print('Building termSwitch', termswitch.__version__)"
+          {
+            echo "__version__ = \"${{ needs.version.outputs.version }}\""
+            echo "__commit__ = \"${GITHUB_SHA::7}\""
+          } > termswitch/_version.py
+          python -c "import termswitch as t; print('Building termSwitch', t.__version__, t.__commit__)"
 
       - name: Install pinned dependencies
         run: python -m pip install --require-hashes -r requirements.lock -r requirements-build.lock

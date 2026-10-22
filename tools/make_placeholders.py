@@ -25,6 +25,7 @@ SHOTS = {
     "run-confirmation.png": (560, 300, "Run confirmation for a destructive command"),
     "dependency-check.png": (760, 520, "Dependency check report"),
     "commands-collapsed.png": (960, 560, "Commands pane collapsed to the right edge"),
+    "about.png": (520, 340, "About termSwitch"),
     "favorites.png": (420, 640, "Favorite commands"),
 }
 
