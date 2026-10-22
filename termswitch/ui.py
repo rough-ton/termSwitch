@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import os
 import re
 import subprocess
 import sys
@@ -16,15 +17,19 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QColo
                                QComboBox, QDialog, QDialogButtonBox, QFontComboBox,
                                QFormLayout, QSpinBox,
                                QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow,
-                               QMenu, QMessageBox, QPushButton, QSplitter, QStyle,
-                               QTextBrowser, QToolBar, QTreeWidget, QTreeWidgetItem,
-                               QVBoxLayout, QWidget)
+                               QMenu, QMessageBox, QPushButton, QSplitter, QStackedWidget,
+                               QStyle, QTextBrowser, QToolBar, QTreeWidget, QTreeWidgetItem,
+                               QVBoxLayout, QWidget, QFileDialog)
 
 from . import __version__
 from .config_store import (SEP, ConfigError, Profile, ProfileStore, is_within, join_group,
                            leaf_name, natural_key, parent_group, safe_https_url)
-from .launcher import (TERMINAL_CHOICES, LaunchError, LaunchOptions, find_aws, launch,
-                       platform_key)
+from .launcher import (TERMINAL_CHOICES, LaunchError, LaunchOptions, aws_setup_command,
+                       find_aws, launch, platform_key)
+from .config_dialogs import (SECRETS_REFUSED, BackupsDialog, ConfigEditorDialog,
+                             WelcomePanel)
+from .profile_dialogs import (KIND_ROLE, KIND_SSO, ProfileDialog, SsoSessionDialog,
+                              SsoSessionsDialog)
 from .deps import ERROR as DEP_ERROR, WARN as DEP_WARN, summary as dep_summary, worst
 from .depsui import DependencyDialog, DependencyRunner
 from .legal import LicensesDialog
@@ -370,6 +375,15 @@ class SettingsDialog(QDialog):
         self.accept()
 
 
+def apply_config_file_setting(settings: QSettings) -> None:
+    """Use the config file chosen in File > Use a different config file. An
+    AWS_CONFIG_FILE set by the user's environment wins. Setting the variable here
+    also makes status checks and new terminal tabs use the same file."""
+    chosen = settings.value("config_file", "", type=str)
+    if chosen and not os.environ.get("AWS_CONFIG_FILE"):
+        os.environ["AWS_CONFIG_FILE"] = chosen
+
+
 def get_setting(settings: QSettings, key: str):
     default = DEFAULTS[key]
     return settings.value(key, default, type=type(default))
@@ -382,8 +396,10 @@ def get_setting(settings: QSettings, key: str):
 class MainWindow(QMainWindow):
     def __init__(self, store: ProfileStore | None = None, settings: QSettings | None = None):
         super().__init__()
-        self.store = store or ProfileStore()
         self.settings = settings or QSettings()
+        if store is None:
+            apply_config_file_setting(self.settings)
+        self.store = store or ProfileStore()
         self.status: dict[str, StatusResult] = {}
         self.expanded: set[str] = set(self.settings.value("expanded", [], type=list) or [])
         self._first_build = not self.settings.contains("expanded")
@@ -457,6 +473,15 @@ class MainWindow(QMainWindow):
         self.tree.customContextMenuRequested.connect(self._context_menu)
         lv.addWidget(self.tree)
 
+        self.welcome = WelcomePanel()
+        self.welcome.setup_sso.connect(self.setup_sso)
+        self.welcome.add_profile.connect(lambda: self.new_profile())
+        self.welcome.choose_file.connect(self.choose_config_file)
+        self.welcome.check_dependencies.connect(self.show_dependency_dialog)
+        self.left_stack = QStackedWidget()
+        self.left_stack.addWidget(left)
+        self.left_stack.addWidget(self.welcome)
+
         details_box = QWidget()
         rv = QVBoxLayout(details_box)
         rv.setContentsMargins(6, 0, 0, 6)
@@ -474,13 +499,16 @@ class MainWindow(QMainWindow):
         self.btn_login.clicked.connect(self.login_selected)
         self.btn_check = QPushButton("Check")
         self.btn_check.clicked.connect(self.check_selected)
-        for b in (self.btn_open, self.btn_login, self.btn_check):
+        self.btn_edit = QPushButton("Edit...")
+        self.btn_edit.setToolTip("Edit the selected profile")
+        self.btn_edit.clicked.connect(self.edit_selected_profile)
+        for b in (self.btn_open, self.btn_login, self.btn_check, self.btn_edit):
             buttons.addWidget(b)
         buttons.addStretch(1)
         rv.addLayout(buttons)
 
         self.left_splitter = QSplitter(Qt.Orientation.Vertical)
-        self.left_splitter.addWidget(left)
+        self.left_splitter.addWidget(self.left_stack)
         self.left_splitter.addWidget(details_box)
         self.left_splitter.setStretchFactor(0, 3)
         self.left_splitter.setStretchFactor(1, 2)
@@ -525,9 +553,16 @@ class MainWindow(QMainWindow):
             sc = QShortcut(QKeySequence(key), self.tree)
             sc.setContext(Qt.ShortcutContext.WidgetShortcut)
             sc.activated.connect(self.open_selected)
-        rename = QShortcut(QKeySequence(Qt.Key.Key_F2), self.tree)
-        rename.setContext(Qt.ShortcutContext.WidgetShortcut)
-        rename.activated.connect(self._rename_current_group)
+        # Profile shortcuts only apply while the tree has focus, so keys such as
+        # Ctrl+Z and Ctrl+N still reach the shell in a terminal tab.
+        for key, slot in ((QKeySequence(Qt.Key.Key_F2), self._rename_current),
+                          (QKeySequence(Qt.Key.Key_Delete), self._delete_current),
+                          (QKeySequence("Ctrl+Backspace"), self._delete_current),
+                          (QKeySequence("Ctrl+N"), self._new_profile_here),
+                          (QKeySequence("Ctrl+E"), self.edit_selected_profile)):
+            sc = QShortcut(key, self.tree)
+            sc.setContext(Qt.ShortcutContext.WidgetShortcut)
+            sc.activated.connect(slot)
 
     def _build_actions(self):
         style = self.style()
@@ -578,14 +613,37 @@ class MainWindow(QMainWindow):
                                  QStyle.StandardPixmap.SP_BrowserReload, QKeySequence.StandardKey.Refresh)
         self.act_settings = action("Settings", self.open_settings, None, "Ctrl+,")
         self.act_settings.setIcon(material_icon("settings"))
+        self.act_new_profile = action("New profile", lambda: self._new_profile_here(),
+                                      QStyle.StandardPixmap.SP_FileIcon)
+        self.act_new_profile.setToolTip("Create a profile in the selected group (Ctrl+N in the tree)")
         for a in (self.act_open, self.act_new_group, self.act_check_all, self.act_reload,
                   self.act_settings):
             tb.addAction(a)
+            if a is self.act_open:
+                tb.addAction(self.act_new_profile)
+
+        self.act_undo = action("Undo", self.undo_config_change)
+        self.act_undo.setShortcut(QKeySequence.StandardKey.Undo)
+        self.act_undo.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.tree.addAction(self.act_undo)
+        self.act_use_default_config = action("Use the default config file",
+                                             self.use_default_config_file)
 
         menu_file = self.menuBar().addMenu("&File")
         menu_file.addAction(self.act_reload)
-        menu_file.addAction(action("Edit config file", self.edit_config))
+        menu_file.addSeparator()
+        menu_file.addAction(action("Set up AWS SSO...", self.setup_sso))
+        menu_file.addAction(action("Add profiles from AWS SSO...", self.add_profiles_from_sso))
+        menu_file.addAction(action("SSO sessions...", self.manage_sso_sessions))
+        menu_file.addSeparator()
+        menu_file.addAction(action("Edit config file...", self.edit_config_in_app))
+        menu_file.addAction(action("Open in external editor", self.edit_config))
         menu_file.addAction(action("Show config folder", self.show_config_folder))
+        menu_file.addAction(action("Backups...", self.show_backups))
+        menu_file.addSeparator()
+        menu_file.addAction(action("Use a different config file...", self.choose_config_file))
+        menu_file.addAction(self.act_use_default_config)
+        menu_file.addAction(action("Reset config...", self.reset_config))
         menu_file.addSeparator()
         menu_file.addAction(self.act_settings)
         menu_file.addSeparator()
@@ -623,7 +681,17 @@ class MainWindow(QMainWindow):
         menu_profiles.addAction(action("Check selected", self.check_selected))
         menu_profiles.addAction(self.act_check_all)
         menu_profiles.addSeparator()
+        menu_profiles.addAction(self.act_new_profile)
+        menu_profiles.addAction(action("Edit profile...", self.edit_selected_profile))
+        menu_profiles.addAction(action("Rename profile...", self._rename_current))
+        menu_profiles.addAction(action("Duplicate profile...", self._duplicate_current))
+        menu_profiles.addAction(action("Delete profile...", self._delete_current))
+        menu_profiles.addSeparator()
         menu_profiles.addAction(self.act_new_group)
+        menu_profiles.addSeparator()
+        menu_profiles.addAction(self.act_undo)
+        menu_profiles.aboutToShow.connect(self._sync_undo)
+        self._sync_undo()
 
         menu_help = self.menuBar().addMenu("&Help")
         menu_help.addAction(action("Check dependencies...", self.show_dependency_dialog))
@@ -642,6 +710,7 @@ class MainWindow(QMainWindow):
             return
         self._watch()
         self.rebuild()
+        self._update_left_view()
         self.statusBar().showMessage(
             f"{len(self.store.profiles)} profiles from {self.store.config_file}", 5000)
 
@@ -1011,14 +1080,14 @@ class MainWindow(QMainWindow):
         term = self.terminals.current_terminal()
         info = self.terminals.current_info()
         shell = "powershell" if platform_key() == "win32" else "posix"
-        region = info.profile.region if info and info.profile.region else ""
+        region = info.profile.region if info and info.profile and info.profile.region else ""
         self.commands.set_target(shell, region, bool(term and term.is_alive()))
 
     def _confirm_run(self, text: str, command, info) -> bool:
         """Ask before running destructive commands anywhere, and anything that
         changes state on a production profile."""
         destructive = is_destructive(command, text)
-        prod = bool(info and self._profile_color(info.profile) == PROD_COLOR)
+        prod = bool(info and info.profile and self._profile_color(info.profile) == PROD_COLOR)
         if not needs_confirmation(command, text, prod):
             return True
         prof = info.profile if info else None
@@ -1130,7 +1199,10 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Could not write config", str(exc))
             self.reload()
             return False
+        self._watch()
         self.rebuild()
+        self._update_left_view()
+        self._sync_undo()
         return True
 
     def _apply_move(self, keys: list[str], target: str | None):
@@ -1204,11 +1276,6 @@ class MainWindow(QMainWindow):
         self._remap_expanded(path, new)
         self._write(self.store.rename_group, path, new)
 
-    def _rename_current_group(self):
-        it = self.tree.currentItem()
-        if it and it.data(0, ROLE)[0] == KIND_GROUP:
-            self.rename_group(it.data(0, ROLE)[1])
-
     def delete_group(self, path: str):
         count = len(self.store.profiles_in(path))
         parent = parent_group(path)
@@ -1238,6 +1305,384 @@ class MainWindow(QMainWindow):
             if not self._write(self.store.set_profile_color, p.name, color):
                 return
 
+
+    # ---- profile management ---------------------------------------------
+
+    def _current_profile(self) -> Profile | None:
+        profiles = self.selected_profiles()
+        return profiles[0] if len(profiles) == 1 else None
+
+    def _is_production(self, profile: Profile) -> bool:
+        return self._profile_color(profile) == PROD_COLOR
+
+    def _confirm_production(self, profiles: list[Profile], verb: str) -> bool:
+        """Second confirmation for production profiles: type the name (or the count)."""
+        prod = [p for p in profiles if self._is_production(p)]
+        if not prod:
+            return True
+        expected = prod[0].name if len(prod) == 1 else f"{verb} {len(prod)}"
+        names = ", ".join(p.name for p in prod[:6]) + (" ..." if len(prod) > 6 else "")
+        text, ok = QInputDialog.getText(
+            self, "Production profile",
+            f"{names} {'is a production profile' if len(prod) == 1 else 'are production profiles'}."
+            f"\n\nType {expected} to confirm:")
+        if not ok:
+            return False
+        if text.strip() != expected:
+            QMessageBox.information(self, "Production profile", "The text didn't match. Nothing changed.")
+            return False
+        return True
+
+    def _create_session_from_dialog(self) -> str | None:
+        dlg = SsoSessionDialog(self.store, parent=self)
+        if not dlg.exec():
+            return None
+        if self._write(self.store.create_sso_session, dlg.name, dlg.props):
+            self.statusBar().showMessage(f"Created SSO session {dlg.name}.", 4000)
+            return dlg.name
+        return None
+
+    def new_profile(self, group: str | None = None, kind: str | None = None,
+                    sso_session: str | None = None):
+        if kind is None and not self.store.sso_sessions:
+            kind = KIND_ROLE if self.store.profiles else KIND_SSO
+        dlg = ProfileDialog(self.store, group=group, kind=kind, sso_session=sso_session,
+                            new_session=self._create_session_from_dialog, parent=self)
+        if not dlg.exec():
+            return
+        if self._write(self.store.create_profile, dlg.name, dlg.props, dlg.group):
+            if dlg.group:
+                for anc in [dlg.group]:
+                    self.expanded.add(item_key(KIND_GROUP, anc))
+                self._save_expanded()
+                self.rebuild()
+            self._select_profile(dlg.name)
+            self.statusBar().showMessage(f"Created profile {dlg.name}.", 4000)
+
+    def _new_profile_here(self):
+        it = self.tree.currentItem()
+        group = None
+        if it is not None:
+            kind, value = it.data(0, ROLE)
+            if kind == KIND_GROUP:
+                group = value
+            elif kind == KIND_PROFILE and value in self.store.profiles:
+                group = self.store.profiles[value].group
+        self.new_profile(group=group)
+
+    def edit_selected_profile(self):
+        prof = self._current_profile()
+        if prof:
+            self.edit_profile(prof)
+
+    def edit_profile(self, prof: Profile):
+        if "config" not in prof.sources:
+            QMessageBox.information(
+                self, "Edit profile",
+                f"'{prof.name}' is only in {self.store.credentials_file}, which termSwitch "
+                "doesn't change. Use `aws configure` to edit it, or move it to AWS SSO.")
+            return
+        dlg = ProfileDialog(self.store, profile=prof,
+                            new_session=self._create_session_from_dialog, parent=self)
+        if not dlg.exec() or not dlg.changes:
+            return
+        if self._write(self.store.update_profile, prof.name, dlg.changes):
+            self.status.pop(prof.name, None)
+            self.rebuild()
+            self.statusBar().showMessage(f"Saved {prof.name}.", 4000)
+
+    def rename_profile(self, prof: Profile):
+        new, ok = QInputDialog.getText(self, "Rename profile", "New name:", text=prof.name)
+        new = new.strip() if ok else ""
+        if not new or new == prof.name:
+            return
+        refs = self.store.references_to(prof.name)
+        update = True
+        if refs:
+            listed = ", ".join(refs[:8]) + (" ..." if len(refs) > 8 else "")
+            box = QMessageBox(QMessageBox.Icon.Question, "Rename profile",
+                              f"{len(refs)} profile(s) use '{prof.name}' as their "
+                              f"source_profile:\n{listed}", parent=self)
+            box.setInformativeText("Update them to use the new name?\n\nScripts and "
+                                   "environment variables that use the old name aren't "
+                                   "changed.")
+            yes = box.addButton("Update them", QMessageBox.ButtonRole.YesRole)
+            box.addButton("Leave them", QMessageBox.ButtonRole.NoRole)
+            box.addButton(QMessageBox.StandardButton.Cancel)
+            box.setDefaultButton(yes)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked not in box.buttons() or box.buttonRole(clicked) == QMessageBox.ButtonRole.RejectRole:
+                return
+            update = clicked is yes
+        if not self._confirm_production([prof], "rename"):
+            return
+        if self._write(self.store.rename_profile, prof.name, new, update):
+            if prof.name in self.status:
+                self.status[new] = self.status.pop(prof.name)
+            n = self.terminals.mark_profile_gone(prof.name, "renamed")
+            self._select_profile(new)
+            note = f" {n} open tab(s) still use the old name." if n else ""
+            self.statusBar().showMessage(f"Renamed {prof.name} to {new}.{note}", 6000)
+
+    def duplicate_profile(self, prof: Profile):
+        if "config" not in prof.sources:
+            QMessageBox.information(self, "Duplicate profile",
+                                    f"'{prof.name}' has no settings in the config to copy.")
+            return
+        suggestion = f"{prof.name}-copy"
+        while suggestion in self.store.profiles:
+            suggestion += "-copy"
+        new, ok = QInputDialog.getText(self, "Duplicate profile",
+                                       "Name for the copy (static keys aren't copied):",
+                                       text=suggestion)
+        new = new.strip() if ok else ""
+        if not new:
+            return
+        if self._write(self.store.duplicate_profile, prof.name, new):
+            self._select_profile(new)
+            self.edit_profile(self.store.profiles[new])
+
+    def delete_profiles(self, profiles: list[Profile]):
+        if not profiles:
+            return
+        names = [p.name for p in profiles]
+        listed = "\n".join(names[:12]) + ("\n..." if len(names) > 12 else "")
+        msg = (f"Delete profile '{names[0]}'?" if len(names) == 1
+               else f"Delete these {len(names)} profiles?\n\n{listed}")
+        refs = sorted({r for n in names for r in self.store.references_to(n)} - set(names))
+        if refs:
+            msg += ("\n\nThese profiles use a deleted profile as their source_profile and "
+                    "will stop working: " + ", ".join(refs))
+        creds = [p.name for p in profiles if "credentials" in p.sources]
+        if creds:
+            msg += (f"\n\n{', '.join(creds)} also {'has' if len(creds) == 1 else 'have'} keys "
+                    f"in {self.store.credentials_file.name}, which termSwitch doesn't change, "
+                    "so they will still be listed.")
+        msg += "\n\nYou can undo this from the Profiles menu."
+        box = QMessageBox(QMessageBox.Icon.Warning, "Delete profile", msg, parent=self)
+        delete = box.addButton("Delete", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        if box.clickedButton() is not delete:
+            return
+        if not self._confirm_production(profiles, "delete"):
+            return
+        if self._write(self.store.delete_profiles, names):
+            tabs = sum(self.terminals.mark_profile_gone(n, "deleted") for n in names
+                       if n not in self.store.profiles)
+            for n in names:
+                if n not in self.store.profiles:
+                    self.status.pop(n, None)
+            note = f" {tabs} open tab(s) keep running." if tabs else ""
+            self.statusBar().showMessage(f"Deleted {len(names)} profile(s).{note}", 6000)
+
+    def _rename_current(self):
+        it = self.tree.currentItem()
+        if it is None:
+            return
+        kind, value = it.data(0, ROLE)
+        if kind == KIND_GROUP:
+            self.rename_group(value)
+        elif kind == KIND_PROFILE and value in self.store.profiles:
+            self.rename_profile(self.store.profiles[value])
+
+    def _duplicate_current(self):
+        prof = self._current_profile()
+        if prof:
+            self.duplicate_profile(prof)
+
+    def _delete_current(self):
+        profiles = self.selected_profiles()
+        if profiles:
+            self.delete_profiles(profiles)
+            return
+        it = self.tree.currentItem()
+        if it is not None and it.data(0, ROLE)[0] == KIND_GROUP:
+            self.delete_group(it.data(0, ROLE)[1])
+
+    def _select_profile(self, name: str):
+        for it in self._profile_items(name):
+            self.tree.clearSelection()
+            parent = it.parent()
+            while parent is not None:
+                parent.setExpanded(True)
+                parent = parent.parent()
+            # NoUpdate: don't let held modifier keys turn this into a toggle.
+            self.tree.setCurrentItem(it, 0, QItemSelectionModel.SelectionFlag.NoUpdate)
+            it.setSelected(True)
+            self.tree.scrollToItem(it)
+            return
+
+    def _sync_undo(self):
+        can = self.store.can_undo()
+        self.act_undo.setEnabled(can)
+        self.act_undo.setText(f"Undo {self.store.undo_label}" if can else "Undo")
+
+    def undo_config_change(self):
+        if not self.store.can_undo():
+            return
+        label = self.store.undo_label
+        if self._write(self.store.undo):
+            self.statusBar().showMessage(f"Undid: {label}", 5000)
+
+    # ---- SSO sessions and setup ------------------------------------------
+
+    def setup_sso(self):
+        if self.store.sso_sessions:
+            names = sorted(self.store.sso_sessions, key=natural_key)
+            choice, ok = QInputDialog.getItem(
+                self, "Set up AWS SSO", "Use an existing SSO session, or create a new one:",
+                names + ["New SSO session..."], 0, False)
+            if not ok:
+                return
+            session = None if choice == "New SSO session..." else choice
+        else:
+            session = None
+        if session is None:
+            session = self._create_session_from_dialog()
+            if not session:
+                return
+        box = QMessageBox(QMessageBox.Icon.Question, "Set up AWS SSO",
+                          f"SSO session '{session}' is ready. How do you want to add profiles?",
+                          parent=self)
+        box.setInformativeText(
+            "Sign in and pick accounts: the AWS CLI opens your browser to sign in, then "
+            "lists the accounts and roles you can use. termSwitch picks up each profile "
+            "it creates.\n\nAdd a profile by hand: enter an account ID and role name.")
+        signin = box.addButton("Sign in and pick accounts", QMessageBox.ButtonRole.AcceptRole)
+        manual = box.addButton("Add a profile by hand", QMessageBox.ButtonRole.ActionRole)
+        box.addButton("Later", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is signin:
+            self.add_profiles_from_sso(session)
+        elif box.clickedButton() is manual:
+            self.new_profile(kind=KIND_SSO, sso_session=session)
+
+    def add_profiles_from_sso(self, session: str | None = None):
+        """Run `aws configure sso` in a tab. The AWS CLI does the sign-in and the
+        account and role listing itself, so termSwitch never handles the SSO token."""
+        if session is None and self.store.sso_sessions:
+            names = sorted(self.store.sso_sessions, key=natural_key)
+            session, ok = QInputDialog.getItem(self, "Add profiles from AWS SSO",
+                                               "SSO session:", names, 0, False)
+            if not ok:
+                return
+        hint = (f"At the first prompt, enter the SSO session name <b>{html.escape(session)}</b>. "
+                if session else "")
+        QMessageBox.information(
+            self, "Add profiles from AWS SSO",
+            f"<p>The AWS CLI will run <code>aws configure sso</code> in a new tab.</p>"
+            f"<p>{hint}Sign in when your browser opens, then pick an account and a role, "
+            "and give the profile a name. Run it again for each account and role you "
+            "want.</p><p>New profiles appear in the tree as soon as the CLI saves them.</p>")
+        try:
+            argv, env = aws_setup_command(["configure", "sso"])
+        except LaunchError as exc:
+            QMessageBox.warning(self, "Add profiles from AWS SSO", str(exc))
+            return
+        self.terminals.open_command("aws configure sso", argv, env,
+                                    tooltip="Adds SSO profiles to " + str(self.store.config_file))
+
+    def manage_sso_sessions(self):
+        def edit(name: str):
+            dlg = SsoSessionDialog(self.store, name=name, parent=self)
+            if dlg.exec() and dlg.changes:
+                self._write(self.store.update_sso_session, name, dlg.changes)
+
+        def delete(name: str):
+            self._write(self.store.delete_sso_session, name)
+
+        SsoSessionsDialog(self.store, self._create_session_from_dialog, edit, delete,
+                          parent=self).exec()
+
+    # ---- the whole config file -------------------------------------------
+
+    def _update_left_view(self):
+        empty = not self.store.profiles
+        if empty:
+            self.welcome.update_state(self.store.config_file, bool(find_aws()))
+        self.left_stack.setCurrentWidget(self.welcome if empty else self.left_stack.widget(0))
+        self.act_use_default_config.setEnabled(
+            bool(self.settings.value("config_file", "", type=str)))
+
+    def edit_config_in_app(self):
+        if self.store.contains_secrets():
+            QMessageBox.information(self, "Edit config file", SECRETS_REFUSED)
+            return
+        dlg = ConfigEditorDialog(self.store, parent=self)
+        if dlg.exec():
+            if self._write(self.store.save_raw, dlg.text()):
+                self.statusBar().showMessage("Saved the config file.", 4000)
+
+    def show_backups(self):
+        dlg = BackupsDialog(self.store, parent=self)
+        if dlg.exec() and dlg.selected:
+            if self._write(self.store.restore_backup, dlg.selected):
+                self.statusBar().showMessage("Restored the backup.", 5000)
+
+    def reset_config(self):
+        path = self.store.config_file
+        if not path.exists():
+            QMessageBox.information(self, "Reset config", f"{path} doesn't exist yet.")
+            return
+        box = QMessageBox(QMessageBox.Icon.Warning, "Reset config",
+                          f"Move {path} aside and start with no profiles?", parent=self)
+        box.setInformativeText("The file is kept as a backup next to it, and you can "
+                               "restore it from File > Backups or undo right away. The AWS "
+                               "CLI won't find any profiles until you set new ones up.")
+        reset = box.addButton("Reset", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        if box.clickedButton() is not reset:
+            return
+        try:
+            dest = self.store.reset_config()
+        except (ConfigError, OSError) as exc:
+            QMessageBox.warning(self, "Reset config", str(exc))
+            return
+        self.status.clear()
+        self.rebuild()
+        self._update_left_view()
+        self._sync_undo()
+        self.statusBar().showMessage(f"Config moved to {dest}.", 8000)
+
+    def choose_config_file(self):
+        start = str(self.store.config_file.parent)
+        path, _ = QFileDialog.getOpenFileName(self, "Use a config file", start,
+                                              "All files (*)")
+        if not path:
+            return
+        candidate = ProfileStore(Path(path), self.store.credentials_file)
+        try:
+            candidate.load()
+        except ConfigError as exc:
+            QMessageBox.warning(self, "Use a config file", str(exc))
+            return
+        self._switch_config_file(Path(path))
+
+    def use_default_config_file(self):
+        self.settings.remove("config_file")
+        os.environ.pop("AWS_CONFIG_FILE", None)
+        self._switch_config_file(None)
+
+    def _switch_config_file(self, path: Path | None):
+        """Point termSwitch, its status checks and new tabs at another config file.
+        Open tabs keep the file they started with."""
+        if path is not None:
+            self.settings.setValue("config_file", str(path))
+            os.environ["AWS_CONFIG_FILE"] = str(path)
+        self.store.discard_undo()
+        old = self.watcher.files() + self.watcher.directories()
+        if old:
+            self.watcher.removePaths(old)
+        self.store = ProfileStore(credentials_file=self.store.credentials_file)
+        self.status.clear()
+        self.reload()
+        self._sync_undo()
+
     # ---- context menu ----------------------------------------------------
 
     def _context_menu(self, pos):
@@ -1245,6 +1690,7 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         if item is None:
             self.tree.clearSelection()
+            menu.addAction("New profile...", lambda: self.new_profile())
             menu.addAction("New group...", lambda: self.new_group(None))
             menu.addAction("Check all", self.check_all)
             menu.exec(self.tree.viewport().mapToGlobal(pos))
@@ -1275,6 +1721,14 @@ class MainWindow(QMainWindow):
                     menu.addAction("Open SSO portal",
                                    lambda: self._open_link(QUrl(prof.sso_start_url)))
                 menu.addSeparator()
+            if len(profiles) == 1:
+                prof = profiles[0]
+                menu.addAction("Edit...", lambda: self.edit_profile(prof))
+                menu.addAction("Rename...", lambda: self.rename_profile(prof))
+                menu.addAction("Duplicate...", lambda: self.duplicate_profile(prof))
+            menu.addAction("Delete..." if len(profiles) == 1 else f"Delete {len(profiles)} profiles...",
+                           lambda: self.delete_profiles(profiles))
+            menu.addSeparator()
             menu.addAction("Set tab color...", lambda: self.set_color(profiles))
             if any(p.color for p in profiles):
                 menu.addAction("Clear tab color", lambda: self.set_color(profiles, clear=True))
@@ -1289,6 +1743,7 @@ class MainWindow(QMainWindow):
                 if any(p.is_sso for p in under):
                     menu.addAction("SSO login for group", lambda: self.login_profiles(under))
                 menu.addSeparator()
+            menu.addAction("New profile here...", lambda: self.new_profile(group=value))
             menu.addAction("New subgroup...", lambda: self.new_group(value))
             menu.addAction("Rename...", lambda: self.rename_group(value))
             menu.addAction("Delete group", lambda: self.delete_group(value))
@@ -1301,6 +1756,7 @@ class MainWindow(QMainWindow):
                 if any(p.is_sso for p in under):
                     menu.addAction("SSO login for group", lambda: self.login_profiles(under))
             menu.addSeparator()
+            menu.addAction("New profile...", lambda: self.new_profile())
             menu.addAction("New group...", lambda: self.new_group(None))
         menu.exec(self.tree.viewport().mapToGlobal(pos))
 
@@ -1312,6 +1768,7 @@ class MainWindow(QMainWindow):
         self.btn_open.setEnabled(bool(profiles))
         self.btn_check.setEnabled(bool(profiles))
         self.btn_login.setEnabled(any(p.is_sso for p in profiles))
+        self.btn_edit.setEnabled(len(profiles) == 1)
 
         if len(items) == 1 and items[0].data(0, ROLE)[0] != KIND_PROFILE:
             self.details.setHtml(self._group_html(items[0]))
@@ -1343,6 +1800,8 @@ class MainWindow(QMainWindow):
             rows.append(("SSO start URL", link))
         if p.props.get("source_profile"):
             rows.append(("Source profile", p.props["source_profile"]))
+        if p.props.get("credential_process"):
+            rows.append(("Note", "Runs a program (credential_process) to get credentials."))
         colour = STATUS_COLORS[state]
         status_html = f'<span style="color:{colour}">&#9679;</span> {STATUS_LABELS[state]}'
         rows.append(("Status", status_html))
@@ -1397,7 +1856,11 @@ class MainWindow(QMainWindow):
             "<li><b>Drag</b> profiles or groups onto a group to move them. Drop a profile on "
             "empty space or an automatic (italic) group to remove its group.</li>"
             "<li>Groups are saved to the config as <code>x_group = Parent/Child</code>.</li>"
-            "<li>Right-click for SSO login, status checks, tab colors and group actions.</li>"
+            "<li>Right-click for SSO login, status checks, tab colors and group actions, "
+            "or to edit, rename, duplicate and delete profiles.</li>"
+            "<li><b>New profile</b> in the toolbar (Ctrl+N in the tree) adds a profile to the "
+            "selected group. Changes can be undone from the Profiles menu (Ctrl+Z in the "
+            "tree).</li>"
             "</ul>")
 
     # ---- misc ------------------------------------------------------------
@@ -1519,6 +1982,7 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
         self.terminals.close_all()
+        self.store.discard_undo()
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("main_splitter_v2", self.splitter.saveState())
         self.settings.setValue("commands_visible", self.commands.isVisible())
