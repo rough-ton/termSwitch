@@ -189,6 +189,10 @@ TEXT_ICONS: list[tuple[str, str]] = [
     (r"Open SSO portal", "url"),
     (r"(Set|Clear) tab color", "palette"),
     (r"Terminal colors", "palette"),
+    (r"New SSH session", "console"),
+    (r"Connect", "console"),
+    (r"Forget saved password", "lock"),
+    (r"Copy ssh command", "command"),
     (r"Restart", "folder-update"),
     # Commands pane
     (r"Refresh$", "folder-update"),

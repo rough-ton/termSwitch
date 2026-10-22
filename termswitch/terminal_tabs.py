@@ -27,6 +27,9 @@ class TabInfo:
     widget: TerminalWidget
     title: str
     orphaned: bool = False           # the profile was deleted or renamed since
+    ssh_session: object = None       # SshSession for SSH tabs
+    autofill: object = None          # PasswordAutofill for SSH tabs with a saved password
+    autofill_factory: object = None
 
 
 class TerminalTabs(QStackedWidget):
@@ -135,6 +138,38 @@ class TerminalTabs(QStackedWidget):
             if info and info.options is not None:
                 self._color_tab_text(self._index_of(term), info.options.tab_color)
 
+    def open_ssh(self, session, argv: list[str], env: dict[str, str], autofill_factory=None,
+                 tooltip: str = ""):
+        """A tab running ssh for a saved session. ``autofill_factory(term)`` may return
+        a PasswordAutofill that watches this tab's output."""
+        from .icons import PROVIDER_ICONS, icon
+        term = TerminalWidget(argv, env, font=self.font, scrollback=self.scrollback,
+                              confirm_multiline_paste=self.confirm_multiline_paste)
+        if self.scheme_for:
+            term.set_scheme(self.scheme_for(None))
+        title = f"ssh: {session.name}"
+        info = TabInfo(None, None, term, title)
+        info.ssh_session = session
+        self._infos[id(term)] = info
+        idx = self.tabs.addTab(term, icon(PROVIDER_ICONS["ssh"], dot=session.color), title)
+        self.tabs.setTabToolTip(idx, tooltip or session.destination)
+        if session.color:
+            self._color_tab_text(idx, session.color)
+        if autofill_factory is not None:
+            autofill = autofill_factory(term)
+            if autofill is not None:
+                term.output_observers.append(autofill.feed)
+                term.input_observers.append(autofill.user_typed)
+                info.autofill = autofill
+                info.autofill_factory = autofill_factory
+        term.exited.connect(lambda code, t=term: self._on_exited(t, code))
+        self.setCurrentWidget(self.tabs)
+        self.tabs.setCurrentIndex(idx)
+        term.start()
+        term.setFocus()
+        self.count_changed.emit(self.tabs.count())
+        return term
+
     def mark_profile_gone(self, name: str, note: str) -> int:
         """Mark tabs of a deleted or renamed profile. Their shells keep running with
         the old AWS_PROFILE, so the tab says so and can't be duplicated."""
@@ -191,7 +226,7 @@ class TerminalTabs(QStackedWidget):
         info = self._infos.get(id(term))
         if idx < 0 or not info:
             return
-        self.tabs.setTabIcon(idx, _color_icon(None, exited=True))
+        self.tabs.setTabIcon(idx, self._tab_icon(info, exited=True))
         self.tabs.setTabText(idx, f"{info.title} (exited)")
         self.terminal_state_changed.emit()
 
@@ -258,12 +293,28 @@ class TerminalTabs(QStackedWidget):
             menu.addAction("Close other tabs", lambda: self._close_others(term))
         menu.exec(bar.mapToGlobal(pos))
 
+    @staticmethod
+    def _tab_icon(info: TabInfo, exited: bool = False) -> QIcon:
+        if info.ssh_session is not None:
+            from .icons import PROVIDER_ICONS, icon
+            return icon(PROVIDER_ICONS["ssh"], dot=None if exited else info.ssh_session.color,
+                        gray=exited)
+        return _color_icon(info.options.tab_color if info.options else None, exited=exited)
+
     def _restart(self, term: TerminalWidget):
         info = self._infos.get(id(term))
         idx = self._index_of(term)
         if info and idx >= 0:
             self.tabs.setTabText(idx, info.title)
-            self.tabs.setTabIcon(idx, _color_icon(info.options.tab_color if info.options else None))
+            self.tabs.setTabIcon(idx, self._tab_icon(info))
+        if info and info.autofill is not None and info.autofill_factory is not None:
+            # A reconnect may fill the saved password again, once.
+            term.output_observers.remove(info.autofill.feed)
+            term.input_observers.remove(info.autofill.user_typed)
+            info.autofill = info.autofill_factory(term)
+            if info.autofill is not None:
+                term.output_observers.append(info.autofill.feed)
+                term.input_observers.append(info.autofill.user_typed)
         term.restart()
         self.terminal_state_changed.emit()
 

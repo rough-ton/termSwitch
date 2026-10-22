@@ -77,6 +77,10 @@ class TerminalWidget(QAbstractScrollArea):
         self._apply_scheme_style()
 
         self._scrollback_size = scrollback
+        # Hooks used by SSH password filling: output_observers get each batch of
+        # output text; input_observers are told when the user sends input.
+        self.output_observers: list = []
+        self.input_observers: list = []
         self.screen = TerminalScreen(80, 24, history=scrollback, reply=self._reply,
                                      on_title=lambda t: self.title_changed.emit(t))
         self.stream = pyte.Stream(self.screen)
@@ -173,7 +177,10 @@ class TerminalWidget(QAbstractScrollArea):
             more = bool(self._pending)
         if chunks:
             before = len(self.screen.scrollback)
-            self.stream.feed("".join(chunks))
+            text = "".join(chunks)
+            for observe in list(self.output_observers):
+                observe(text)
+            self.stream.feed(text)
             if self._scroll:
                 # Keep the view still while new output arrives.
                 self._scroll = min(self._scroll + len(self.screen.scrollback) - before,
@@ -203,8 +210,16 @@ class TerminalWidget(QAbstractScrollArea):
 
     def send_text(self, text: str) -> None:
         if self.pty and self.pty.is_alive():
+            for observe in list(self.input_observers):
+                observe()
             self.pty.write(text)
             self._scroll_to_bottom()
+
+    def write_secret(self, text: str) -> None:
+        """Send text to the program without recording or echoing it on our side (used
+        to answer a password prompt). Not reported to input observers."""
+        if self.pty and self.pty.is_alive():
+            self.pty.write(text)
 
     def insert_command(self, command: str, run: bool = False) -> None:
         """Type a command at the prompt; press Enter only when run=True."""

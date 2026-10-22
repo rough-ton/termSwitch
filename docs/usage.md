@@ -7,6 +7,7 @@
 - [Profiles and groups](#profiles-and-groups)
 - [Managing profiles](#managing-profiles)
 - [Managing the config file](#managing-the-config-file)
+- [SSH sessions](#ssh-sessions)
 - [Terminal tabs](#terminal-tabs)
 - [Commands pane](#commands-pane)
 - [Favorite commands](#favorite-commands)
@@ -167,6 +168,40 @@ The **File** menu has tools for the whole config:
 - **Reset config:** moves the config aside as a backup and shows the welcome panel. The
   old file is kept, and can be restored from Backups or with Undo. A symlinked config
   (for example from a dotfiles repo) is never reset.
+
+## SSH sessions
+
+termSwitch can also open saved SSH connections in terminal tabs. They're listed in the
+tree under **SSH sessions**, with a teal terminal icon.
+
+- **Where sessions come from:**
+  - Sessions you create in termSwitch (Profiles > **New SSH session**, or right-click
+    the SSH folder), in your own groups.
+  - The `Host` entries in `~/.ssh/config`, in a read-only **~/.ssh/config** folder.
+    Wildcard entries are skipped and `Include` files are followed. termSwitch never
+    changes that file; connecting runs `ssh <alias>`, so all your settings there apply.
+    Use **Duplicate** to turn one into an editable termSwitch session.
+- **Connecting:** double-click, Enter, or right-click > **Connect**. termSwitch runs your
+  system's OpenSSH client (`ssh`), so host key checks, `known_hosts`, agents and
+  `~/.ssh/config` work exactly as they do in any terminal. The first time you connect to
+  a host, ssh shows the host's fingerprint in the tab for you to confirm.
+- **Sign-in methods:**
+  - **SSH agent or ~/.ssh defaults:** whatever keys ssh finds on its own.
+  - **Key file:** a specific private key, with an optional certificate
+    (`-cert.pub`). If the key has a passphrase, ssh asks for it in the tab.
+  - **Password:** asked for in the tab every time, by default.
+- **Remembering a password** (optional): check **Remember the password** in the session
+  editor. The password is stored only in the macOS Keychain or the Windows Credential
+  Manager, never in termSwitch's files. When you connect, termSwitch types it once at
+  ssh's own password prompt for that user and host. **Forget saved password** (right-
+  click) or unchecking the box removes it, and deleting a session removes it too.
+- **Other options:** port, user, jump host (`-J`), keepalive, and agent forwarding (only
+  for hosts you trust).
+- **Copy ssh command** puts the exact command on the clipboard, to run it elsewhere.
+
+On Linux, and anywhere the system password store isn't available, the remember option
+is turned off and ssh asks for the password in the tab. On macOS, an unsigned build may
+ask for permission to read the saved password after an update.
 
 ## Terminal tabs
 

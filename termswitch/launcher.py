@@ -132,6 +132,26 @@ def find_aws(platform: str | None = None) -> str | None:
     return secure_which("aws", platform)
 
 
+def find_ssh(platform: str | None = None) -> str | None:
+    """The OpenSSH client: ssh.exe on Windows 10+ (System32\\OpenSSH), ssh elsewhere."""
+    found = secure_which("ssh", platform)
+    if found or platform_key(platform) != "win32":
+        return found
+    import ntpath
+    builtin = ntpath.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "OpenSSH",
+                          "ssh.exe")
+    return builtin if os.path.isfile(builtin) else None
+
+
+def ssh_env(platform: str | None = None) -> dict[str, str]:
+    """Environment for an SSH tab: the usual scrubbed terminal environment, with any
+    askpass override removed so ssh asks its questions in the tab itself."""
+    env = terminal_env(platform)
+    for var in ("SSH_ASKPASS", "SSH_ASKPASS_REQUIRE", "AWS_PROFILE"):
+        env.pop(var, None)
+    return env
+
+
 def _which(name: str, platform: str | None = None) -> str | None:
     return secure_which(name, platform)
 

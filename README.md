@@ -27,6 +27,9 @@ already set to that profile.
   undo. New users get a guided AWS SSO setup.
 - **Embedded terminals.** One tab per profile, with PowerShell on Windows and your login
   shell on macOS. Full-screen programs, scrollback and colored tabs work as expected.
+- **SSH sessions.** Saved SSH connections, plus your `~/.ssh/config` hosts, open in tabs
+  with the system ssh client. Keys, certificates and agents are supported; passwords
+  can be remembered in the macOS Keychain or Windows Credential Manager.
 - **Commands pane.** Browse every AWS CLI command your installed CLI supports, fill in a
   parameter form, then run, insert or copy the result. Star the ones you use most.
 - **Credential status and SSO.** Status dots show which profiles have valid credentials,

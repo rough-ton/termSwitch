@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QColo
 from .config_store import (SEP, ConfigError, Profile, ProfileStore, is_within, join_group,
                            leaf_name, natural_key, parent_group, safe_https_url)
 from .launcher import (TERMINAL_CHOICES, LaunchError, LaunchOptions, aws_setup_command,
-                       find_aws, launch, platform_key)
+                       find_aws, find_ssh, launch, platform_key, ssh_env)
 from .config_dialogs import (SECRETS_REFUSED, BackupsDialog, ConfigEditorDialog,
                              WelcomePanel)
 from .profile_dialogs import (KIND_ROLE, KIND_SSO, ProfileDialog, SsoSessionDialog,
@@ -35,6 +35,9 @@ from .legal import LicensesDialog
 from . import theme
 from .term_schemes import (MATCH_APP, SchemeError, all_schemes, import_file, save_user_scheme,
                            scheme_for)
+from .ssh_dialogs import DELETE as PW_DELETE, SET as PW_SET, SshSessionDialog
+from .ssh_sessions import (PasswordAutofill, PasswordStore, SessionError, SessionStore,
+                           SshSession, display_command, key_file_problem, ssh_argv)
 from .icons import (AUTO_GROUP_ICONS, PROVIDER_DOT_CORNER, PROVIDER_ICONS, decorate_menu, icon as material_icon,
                     install_icon_theme, shell_icon)
 from .aws_params import is_destructive, needs_confirmation
@@ -45,6 +48,10 @@ from .status import CHECKING, ERROR, EXPIRED, UNKNOWN, VALID, StatusChecker, Sta
 
 ROLE = Qt.ItemDataRole.UserRole
 KIND_GROUP, KIND_AUTO, KIND_PROFILE = "group", "auto", "profile"
+KIND_SSH_ROOT, KIND_SSH_GROUP, KIND_SSH = "sshroot", "sshgroup", "ssh"
+SSH_KINDS = (KIND_SSH_ROOT, KIND_SSH_GROUP, KIND_SSH)
+SSH_ROOT_LABEL = "SSH sessions"
+SSH_CONFIG_KEY = "\x00ssh-config"      # tree key for the ~/.ssh/config folder
 
 STATUS_COLORS = {
     UNKNOWN: "#9aa0a6", CHECKING: "#f2b01e", VALID: "#2ea44f",
@@ -186,6 +193,8 @@ class ProfileTree(QTreeWidget):
             target = None
         else:
             kind, value = item.data(0, ROLE)
+            if kind in SSH_KINDS:
+                return False, None       # SSH sessions are grouped in their editor
             on_item = indicator == QAbstractItemView.DropIndicatorPosition.OnItem
             if on_item and kind == KIND_GROUP:
                 target = value
@@ -456,6 +465,8 @@ class MainWindow(QMainWindow):
         self.theme.apply(get_setting(self.settings, "app_theme"))
         self.theme.changed.connect(self._on_theme_changed)
         self.schemes = all_schemes()
+        self.ssh_store = SessionStore()
+        self.passwords = PasswordStore()
         self.expanded: set[str] = set(self.settings.value("expanded", [], type=list) or [])
         self._first_build = not self.settings.contains("expanded")
         self._tracking = True
@@ -747,6 +758,7 @@ class MainWindow(QMainWindow):
         menu_profiles.addAction(self.act_check_all)
         menu_profiles.addSeparator()
         menu_profiles.addAction(self.act_new_profile)
+        menu_profiles.addAction(action("New SSH session...", lambda: self.new_ssh_session()))
         menu_profiles.addAction(action("Edit profile...", self.edit_selected_profile))
         menu_profiles.addAction(action("Rename profile...", self._rename_current))
         menu_profiles.addAction(action("Duplicate profile...", self._duplicate_current))
@@ -768,6 +780,9 @@ class MainWindow(QMainWindow):
     # ---- loading and tree building --------------------------------------
 
     def reload(self):
+        self.ssh_store.load()
+        for warning in self.ssh_store.warnings:
+            self.statusBar().showMessage(warning, 8000)
         try:
             self.store.load()
         except ConfigError as exc:
@@ -904,7 +919,11 @@ class MainWindow(QMainWindow):
                         | Qt.ItemFlag.ItemIsDragEnabled)
             self._decorate_profile(it, prof)
 
+        ssh_items = self._build_ssh_items()
+
         # Expansion state
+        for key, it in ssh_items.items():
+            it.setExpanded(self._first_build or key in self.expanded)
         for key_path, it in list(group_items.items()):
             key = item_key(KIND_GROUP, key_path)
             it.setExpanded(self._first_build or key in self.expanded)
@@ -913,7 +932,8 @@ class MainWindow(QMainWindow):
             it.setExpanded(self._first_build or key in self.expanded)
         if self._first_build:
             self.expanded = {item_key(*i.data(0, ROLE))
-                             for i in list(group_items.values()) + list(auto_items.values())}
+                             for i in list(group_items.values()) + list(auto_items.values())
+                             + list(ssh_items.values())}
             self._first_build = False
             self._save_expanded()
 
@@ -929,6 +949,72 @@ class MainWindow(QMainWindow):
         self._tracking = True
         self._apply_filter(self.filter.text())
         self._show_details()
+
+    def _build_ssh_items(self) -> dict[str, QTreeWidgetItem]:
+        """The "SSH sessions" folder: termSwitch's sessions in their groups, and
+        ~/.ssh/config hosts in their own read-only folder. Returns folders by key."""
+        sessions = self.ssh_store.all()
+        if not sessions:
+            return {}
+        folders: dict[str, QTreeWidgetItem] = {}
+        root = QTreeWidgetItem(self.tree.invisibleRootItem(), [SSH_ROOT_LABEL])
+        root.setData(0, ROLE, (KIND_SSH_ROOT, ""))
+        root.setIcon(0, material_icon(PROVIDER_ICONS["ssh"]))
+        root.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+        f = root.font(0)
+        f.setBold(True)
+        root.setFont(0, f)
+        folders[item_key(KIND_SSH_ROOT, "")] = root
+
+        def folder(path: str) -> QTreeWidgetItem:
+            key = item_key(KIND_SSH_GROUP, path)
+            if key in folders:
+                return folders[key]
+            parent = folder(parent_group(path)) if parent_group(path) else root
+            it = QTreeWidgetItem(parent, [leaf_name(path)])
+            it.setData(0, ROLE, (KIND_SSH_GROUP, path))
+            it.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            it.setIcon(0, material_icon("folder-base"))
+            folders[key] = it
+            return it
+
+        def config_folder() -> QTreeWidgetItem:
+            # One folder, not a path: its name contains "/".
+            key = item_key(KIND_SSH_GROUP, SSH_CONFIG_KEY)
+            if key not in folders:
+                it = QTreeWidgetItem(root, ["~/.ssh/config"])
+                it.setData(0, ROLE, (KIND_SSH_GROUP, SSH_CONFIG_KEY))
+                it.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                it.setIcon(0, material_icon("folder-config"))
+                fi = it.font(0)
+                fi.setItalic(True)
+                it.setFont(0, fi)
+                it.setForeground(0, QBrush(QColor(theme.colors().hint)))
+                it.setToolTip(0, "Hosts from ~/.ssh/config (read-only)")
+                folders[key] = it
+            return folders[key]
+
+        for s in sorted(sessions, key=lambda s: (s.from_ssh_config, natural_key(s.display_group),
+                                                  natural_key(s.name))):
+            if s.from_ssh_config:
+                parent = config_folder()
+            else:
+                parent = folder(s.group) if s.group else root
+            it = QTreeWidgetItem(parent, [s.name])
+            it.setData(0, ROLE, (KIND_SSH, s.id))
+            it.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            it.setIcon(0, material_icon(PROVIDER_ICONS["ssh"], dot=s.color,
+                                        corner=PROVIDER_DOT_CORNER))
+            port = f":{s.port}" if s.port != 22 else ""
+            tip = [s.name, f"{s.destination}{port}"]
+            if s.jump:
+                tip.append(f"Through {s.jump}")
+            if s.from_ssh_config:
+                tip.append("From ~/.ssh/config (read-only)")
+            it.setToolTip(0, "\n".join(tip))
+            if s.color:
+                it.setForeground(0, QBrush(QColor(s.color)))
+        return folders
 
     def _decorate_profile(self, it: QTreeWidgetItem, prof: Profile):
         result = self.status.get(prof.name)
@@ -1029,6 +1115,25 @@ class MainWindow(QMainWindow):
                 names.append(value)
         return [self.store.profiles[n] for n in names if n in self.store.profiles]
 
+    def selected_ssh(self) -> list[SshSession]:
+        found: list[SshSession] = []
+        for it in self.tree.selectedItems():
+            kind, value = it.data(0, ROLE)
+            s = self.ssh_store.get(value) if kind == KIND_SSH else None
+            if s is not None and s not in found:
+                found.append(s)
+        return found
+
+    def ssh_under(self, item: QTreeWidgetItem) -> list[SshSession]:
+        found, stack = [], [item]
+        while stack:
+            node = stack.pop()
+            kind, value = node.data(0, ROLE)
+            if kind == KIND_SSH and self.ssh_store.get(value):
+                found.append(self.ssh_store.get(value))
+            stack.extend(node.child(i) for i in range(node.childCount()))
+        return found
+
     def profiles_under(self, item: QTreeWidgetItem) -> list[Profile]:
         out = []
         stack = [item]
@@ -1098,6 +1203,8 @@ class MainWindow(QMainWindow):
 
     def open_selected(self, invert: bool | None = False, external: bool | None = None):
         self.open_profiles(self.selected_profiles(), external=external, invert=invert)
+        for s in self.selected_ssh():
+            self.connect_ssh(s)
 
     def _shift_held(self) -> bool:
         return bool(QGuiApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier)
@@ -1106,6 +1213,8 @@ class MainWindow(QMainWindow):
         kind, value = item.data(0, ROLE)
         if kind == KIND_PROFILE:
             self.open_profiles([self.store.profiles[value]], invert=self._shift_held())
+        elif kind == KIND_SSH and self.ssh_store.get(value):
+            self.connect_ssh(self.ssh_store.get(value))
 
     def _on_click(self, item: QTreeWidgetItem, _col: int):
         if not get_setting(self.settings, "single_click"):
@@ -1115,6 +1224,8 @@ class MainWindow(QMainWindow):
         kind, value = item.data(0, ROLE)
         if kind == KIND_PROFILE:
             self.open_profiles([self.store.profiles[value]])
+        elif kind == KIND_SSH and self.ssh_store.get(value):
+            self.connect_ssh(self.ssh_store.get(value))
 
     # ---- terminal tabs ---------------------------------------------------
 
@@ -1465,6 +1576,10 @@ class MainWindow(QMainWindow):
         prof = self._current_profile()
         if prof:
             self.edit_profile(prof)
+            return
+        sessions = self.selected_ssh()
+        if len(sessions) == 1:
+            self.edit_ssh(sessions[0])
 
     def edit_profile(self, prof: Profile):
         if "config" not in prof.sources:
@@ -1691,7 +1806,7 @@ class MainWindow(QMainWindow):
     # ---- the whole config file -------------------------------------------
 
     def _update_left_view(self):
-        empty = not self.store.profiles
+        empty = not self.store.profiles and not self.ssh_store.all()
         if empty:
             self.welcome.update_state(self.store.config_file, bool(find_aws()))
         self.left_stack.setCurrentWidget(self.welcome if empty else self.left_stack.widget(0))
@@ -1774,6 +1889,187 @@ class MainWindow(QMainWindow):
         self.reload()
         self._sync_undo()
 
+
+    # ---- SSH sessions ------------------------------------------------------
+
+    def connect_ssh(self, session: SshSession):
+        ssh = find_ssh()
+        if not ssh:
+            QMessageBox.warning(self, "SSH", "The OpenSSH client (ssh) was not found. Install "
+                                "it, or on Windows add the OpenSSH Client optional feature.")
+            return
+        problem = key_file_problem(session.key_file) if session.auth == "key" else None
+        if problem and "other users" in problem:
+            QMessageBox.warning(self, "SSH key", problem + "\n\nssh refuses keys that other "
+                                "users can read.")
+        try:
+            argv = ssh_argv(session, ssh)
+        except SessionError as exc:
+            QMessageBox.warning(self, "SSH", str(exc))
+            return
+        factory = None
+        if (session.remember_password and not session.from_ssh_config
+                and self.passwords.available):
+            # The password is read from the store only when ssh actually asks.
+            factory = self._autofill_factory(session)
+        self.terminals.open_ssh(session, argv, ssh_env(), autofill_factory=factory,
+                                tooltip=display_command(argv))
+
+    def _autofill_factory(self, session: SshSession):
+        sid = session.id
+
+        def make(term):
+            return PasswordAutofill(session, lambda: self.passwords.get(sid), term.write_secret)
+        return make
+
+    def new_ssh_session(self, group: str | None = None):
+        dlg = SshSessionDialog(self.ssh_store, self.passwords, group=group, parent=self)
+        if dlg.exec():
+            self._save_ssh(dlg)
+
+    def edit_ssh(self, session: SshSession):
+        if session.from_ssh_config:
+            QMessageBox.information(
+                self, "Edit SSH session",
+                f"'{session.name}' comes from ~/.ssh/config, which termSwitch doesn't change. "
+                "Edit that file, or use Duplicate to make a termSwitch session from it.")
+            return
+        dlg = SshSessionDialog(self.ssh_store, self.passwords, session=session, parent=self)
+        if dlg.exec():
+            self._save_ssh(dlg)
+
+    def _save_ssh(self, dlg: SshSessionDialog):
+        session = dlg.session
+        try:
+            # Password store first: if it fails, nothing claims a password is saved.
+            if dlg.password_action == PW_SET:
+                self.passwords.set(session.id, dlg.take_password())
+            self.ssh_store.save(session)
+            if dlg.password_action == PW_DELETE:
+                self.passwords.delete(session.id)
+        except (SessionError, OSError) as exc:
+            QMessageBox.warning(self, "SSH session", str(exc))
+            return
+        except Exception as exc:     # errors from the system password store
+            QMessageBox.warning(self, "SSH session",
+                                f"The {self.passwords.store_name()} refused the password: {exc}")
+            return
+        if session.group:
+            self.expanded.add(item_key(KIND_SSH_GROUP, session.group))
+        self.expanded.add(item_key(KIND_SSH_ROOT, ""))
+        self._save_expanded()
+        self.rebuild()
+        self._update_left_view()
+        self._select_ssh(session.id)
+        self.statusBar().showMessage(f"Saved SSH session {session.name}.", 4000)
+
+    def duplicate_ssh(self, session: SshSession):
+        name, ok = QInputDialog.getText(self, "Duplicate SSH session", "Name for the copy:",
+                                        text=f"{session.name}-copy")
+        name = name.strip() if ok else ""
+        if not name:
+            return
+        try:
+            copy = self.ssh_store.duplicate(session, name)
+        except (SessionError, OSError) as exc:
+            QMessageBox.warning(self, "Duplicate SSH session", str(exc))
+            return
+        self.rebuild()
+        self._select_ssh(copy.id)
+        self.edit_ssh(copy)
+
+    def delete_ssh(self, sessions: list[SshSession]):
+        own = [s for s in sessions if not s.from_ssh_config]
+        if not own:
+            QMessageBox.information(self, "Delete SSH session",
+                                    "Hosts from ~/.ssh/config can only be removed in that file.")
+            return
+        names = "\n".join(s.name for s in own[:12]) + ("\n..." if len(own) > 12 else "")
+        box = QMessageBox(QMessageBox.Icon.Warning, "Delete SSH session",
+                          f"Delete {'this SSH session' if len(own) == 1 else f'these {len(own)} SSH sessions'}?"
+                          f"\n\n{names}", parent=self)
+        box.setInformativeText("Saved passwords for them are removed from the "
+                               f"{self.passwords.store_name()} too.")
+        delete = box.addButton("Delete", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        if box.clickedButton() is not delete:
+            return
+        for s in own:
+            try:
+                self.ssh_store.delete(s.id)
+            except (SessionError, OSError) as exc:
+                QMessageBox.warning(self, "Delete SSH session", str(exc))
+                break
+            self.passwords.delete(s.id)
+        self.rebuild()
+        self._update_left_view()
+
+    def forget_ssh_password(self, session: SshSession):
+        from dataclasses import replace as _replace
+        self.passwords.delete(session.id)
+        try:
+            self.ssh_store.save(_replace(session, remember_password=False))
+        except (SessionError, OSError) as exc:
+            QMessageBox.warning(self, "Forget password", str(exc))
+        self.rebuild()
+        self.statusBar().showMessage(f"Forgot the saved password for {session.name}.", 4000)
+
+    def _select_ssh(self, session_id: str):
+        for it in self._iter_items():
+            if it.data(0, ROLE) == (KIND_SSH, session_id):
+                self.tree.clearSelection()
+                parent = it.parent()
+                while parent is not None:
+                    parent.setExpanded(True)
+                    parent = parent.parent()
+                self.tree.setCurrentItem(it, 0, QItemSelectionModel.SelectionFlag.NoUpdate)
+                it.setSelected(True)
+                self.tree.scrollToItem(it)
+                return
+
+    def _ssh_menu(self, menu: QMenu, sessions: list[SshSession]):
+        label = "Connect" if len(sessions) == 1 else f"Connect {len(sessions)} sessions"
+        menu.addAction(label, lambda: [self.connect_ssh(s) for s in sessions])
+        menu.addSeparator()
+        if len(sessions) == 1:
+            s = sessions[0]
+            menu.addAction("Edit...", lambda: self.edit_ssh(s))
+            menu.addAction("Duplicate...", lambda: self.duplicate_ssh(s))
+            ssh = find_ssh() or "ssh"
+            try:
+                command = display_command(ssh_argv(s, ssh))
+                menu.addAction("Copy ssh command",
+                               lambda: QApplication.clipboard().setText(command))
+            except SessionError:
+                pass
+            if s.remember_password and not s.from_ssh_config:
+                menu.addAction("Forget saved password", lambda: self.forget_ssh_password(s))
+        if any(not s.from_ssh_config for s in sessions):
+            menu.addAction("Delete..." if len(sessions) == 1 else
+                           f"Delete {len(sessions)} sessions...", lambda: self.delete_ssh(sessions))
+
+    def _ssh_html(self, s: SshSession) -> str:
+        hint = theme.colors().hint
+        auth = {"password": "Password (asked in the tab)", "key": "Key file",
+                "agent": "SSH agent or ~/.ssh defaults"}.get(s.auth, s.auth)
+        if s.auth == "password" and s.remember_password:
+            auth = f"Password (saved in the {self.passwords.store_name()})"
+        rows = [("Host", s.host), ("Port", str(s.port)), ("User", s.user or "(default)"),
+                ("Sign in", auth), ("Key file", s.key_file), ("Certificate", s.cert_file),
+                ("Jump host", s.jump), ("Group", s.display_group)]
+        rows += [(k, v) for k, v in sorted(s.options.items())]
+        if s.from_ssh_config:
+            rows.append(("Source", "~/.ssh/config (read-only)"))
+        problem = key_file_problem(s.key_file) if s.auth == "key" else None
+        table = "".join(
+            f"<tr><td style='color:{hint};padding-right:12px'>{html.escape(k)}</td>"
+            f"<td>{html.escape(v)}</td></tr>" for k, v in rows if v)
+        warn = (f"<p style='color:{theme.colors().warning}'>{html.escape(problem)}</p>"
+                if problem else "")
+        return (f"<h2>{html.escape(s.name)}</h2><table cellspacing=2>{table}</table>{warn}")
+
     # ---- context menu ----------------------------------------------------
 
     def _context_menu(self, pos):
@@ -1782,6 +2078,7 @@ class MainWindow(QMainWindow):
         if item is None:
             self.tree.clearSelection()
             menu.addAction("New profile...", lambda: self.new_profile())
+            menu.addAction("New SSH session...", lambda: self.new_ssh_session())
             menu.addAction("New group...", lambda: self.new_group(None))
             menu.addAction("Check all", self.check_all)
             menu.exec(self.tree.viewport().mapToGlobal(pos))
@@ -1791,6 +2088,21 @@ class MainWindow(QMainWindow):
             item.setSelected(True)
             self.tree.setCurrentItem(item)
         kind, value = item.data(0, ROLE)
+
+        if kind == KIND_SSH:
+            self._ssh_menu(menu, self.selected_ssh())
+            menu.exec(self.tree.viewport().mapToGlobal(pos))
+            return
+        if kind in (KIND_SSH_ROOT, KIND_SSH_GROUP):
+            under = self.ssh_under(item)
+            if under:
+                menu.addAction(f"Connect all {len(under)}",
+                               lambda: [self.connect_ssh(s) for s in under])
+                menu.addSeparator()
+            group = value if kind == KIND_SSH_GROUP and value != SSH_CONFIG_KEY else None
+            menu.addAction("New SSH session...", lambda: self.new_ssh_session(group))
+            menu.exec(self.tree.viewport().mapToGlobal(pos))
+            return
 
         if kind == KIND_PROFILE:
             profiles = self.selected_profiles()
@@ -1865,6 +2177,16 @@ class MainWindow(QMainWindow):
 
     def _show_details(self):
         hint = theme.colors().hint
+        items = self.tree.selectedItems()
+        if len(items) == 1 and items[0].data(0, ROLE)[0] == KIND_SSH:
+            s = self.ssh_store.get(items[0].data(0, ROLE)[1])
+            self.btn_open.setEnabled(s is not None)
+            self.btn_edit.setEnabled(s is not None and not s.from_ssh_config)
+            for b in (self.btn_check, self.btn_login):
+                b.setEnabled(False)
+            if s is not None:
+                self.details.setHtml(self._ssh_html(s))
+            return
         items = self.tree.selectedItems()
         profiles = self.selected_profiles()
         self.btn_open.setEnabled(bool(profiles))

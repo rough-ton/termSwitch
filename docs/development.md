@@ -123,6 +123,10 @@ termswitch/
   config_dialogs.py   welcome panel, config editor, backups
   about.py         Help > About dialog and system information
   links.py         every web address the app links to (website, GitHub, releases)
+  theme.py         light and dark themes, colors with a meaning
+  term_schemes.py  terminal color schemes and scheme import
+  ssh_sessions.py  SSH sessions: storage, ~/.ssh/config, the ssh command, saved passwords
+  ssh_dialogs.py   the SSH session editor
 tests/
 tools/build_icons.py
 .github/workflows/ ci.yml (tests), release.yml (builds and publishes downloads)
