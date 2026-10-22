@@ -57,6 +57,53 @@ class TerminalScreen(pyte.Screen):
         self._on_title = on_title
         super().__init__(columns, lines)
 
+    # Palette colors 0 to 15 picked with the 256-color codes (38;5;n and 48;5;n), as
+    # prompt themes such as Powerlevel10k do, are the scheme's 16 colors. pyte turns
+    # them into fixed xterm values instead, so they're mapped back to color names
+    # here. This also fixes pyte's misspelled bright magenta background (105).
+    _INDEX_NAMES = ("black", "red", "green", "brown", "blue", "magenta", "cyan", "white")
+
+    def select_graphic_rendition(self, *attrs) -> None:
+        super().select_graphic_rendition(*attrs)
+        fg = bg = None                       # the name to use, if the last change was ours
+        i, n = 0, len(attrs)
+        while i < n:
+            a = attrs[i]
+            if a in (38, 48) and i + 1 < n and attrs[i + 1] == 5 and i + 2 < n:
+                idx = attrs[i + 2]
+                name = None
+                if 0 <= idx < 16:
+                    name = ("bright" if idx >= 8 else "") + self._INDEX_NAMES[idx % 8]
+                if a == 38:
+                    fg = name
+                else:
+                    bg = name
+                i += 3
+                continue
+            if a in (38, 48) and i + 1 < n and attrs[i + 1] == 2:
+                if a == 38:
+                    fg = None
+                else:
+                    bg = None
+                i += 5
+                continue
+            if a == 0:
+                fg = bg = None
+            elif 30 <= a <= 39 or 90 <= a <= 97:
+                fg = None
+            elif 40 <= a <= 49:
+                bg = None
+            elif 100 <= a <= 107:
+                bg = "bright" + self._INDEX_NAMES[a - 100]
+            i += 1
+        if fg or bg:
+            changes = {}
+            if fg:
+                changes["fg"] = fg
+            if bg:
+                changes["bg"] = bg
+            self.cursor.attrs = self.cursor.attrs._replace(**changes)
+
     # Replies to DSR / DA queries go back to the program.
     def write_process_input(self, data: str) -> None:
         if self._reply:

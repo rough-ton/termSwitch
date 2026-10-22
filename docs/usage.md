@@ -414,7 +414,10 @@ Settings has the appearance options:
 - **Terminal colors:** the color scheme for terminal tabs.
   - **Match the app theme** (the default) uses the built-in Light scheme with the light
     theme, and Dark with the dark theme.
-  - Or pick one scheme for every tab: Dark, Light, High contrast, or one you imported.
+  - Or pick one scheme for every tab: termSwitch's own Dark, Light and High contrast;
+    the popular **Dracula**, **Catppuccin Mocha**, **Catppuccin Latte**, **Solarized
+    Dark**, **Solarized Light**, **Nord** and **Gruvbox Dark**, with each project's
+    published colors; or one you imported.
   - **Import...** reads a Windows Terminal color scheme (`.json`, a single scheme or a
     whole `settings.json`) or an iTerm2 `.itermcolors` file. Imported schemes are saved
     in termSwitch's data folder.
@@ -425,6 +428,24 @@ scheme, for example High contrast for production. **Default** goes back to the s
 above. The choice is saved in `~/.aws/config` as `x_term_scheme`, next to `x_group`.
 
 Changes apply to open tabs right away; the shells keep running.
+
+Schemes only color termSwitch's own tabs. Choosing one never changes Windows Terminal,
+iTerm2, Terminal.app or your shell's startup files, and nothing is sent to the running
+shell. Profiles opened in an external terminal (Shift+double-click) keep that
+terminal's own colors.
+
+### Powerline prompts
+
+Prompt themes such as Powerlevel10k (zsh), Oh My Posh (PowerShell) and Starship (both)
+work in termSwitch tabs, since each tab runs your own shell with its own startup files.
+
+- The arrow-shaped separators between prompt segments are drawn by termSwitch to fill
+  each cell exactly, so segments meet without gaps and the arrows show even with a
+  plain font.
+- Prompt icons (folders, git branches, the Apple logo) need a Nerd Font, such as
+  MesloLGS NF. Install it, then choose it under Settings > Terminal font.
+- Colors a prompt picks from the 16-color palette, including with 256-color codes as
+  Powerlevel10k does, follow the chosen scheme.
 
 Meaningful colors keep their meaning in both themes: production profiles are red,
 status dots are grey, green, orange and red, and errors in forms are red. Each theme
