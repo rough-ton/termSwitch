@@ -36,3 +36,11 @@ python tools/check_attribution.py --commits --files
 ```
 
 Dependency changes go in the `.in` files; regenerate the locks as described in [docs/development.md](docs/development.md#dependency-locks).
+When a dependency is added or its locked version changes, update the summary table in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and add its license text. CI fails
+until every package in `requirements.lock` is listed with the locked version.
+
+## License
+
+termSwitch is released under the [MIT license](LICENSE). By contributing, you agree
+that your contributions are licensed under the same terms.

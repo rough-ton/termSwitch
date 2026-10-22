@@ -70,6 +70,15 @@ for f in requirements requirements-build requirements-dev; do
 done
 ```
 
+## Licenses and notices
+
+The project license is in `LICENSE`. Everything the downloads bundle is listed in
+`THIRD_PARTY_NOTICES.md`, with full texts of the longer licenses in `licenses/`. The
+release build copies all of these, plus the license of the Python interpreter it
+bundles, into the app, where Help > Licenses shows them. `tests/test_legal.py` fails
+if a package in `requirements.lock` is missing from the notices or listed with the
+wrong version.
+
 ## Commit policy
 
 Read [CONTRIBUTING.md](../CONTRIBUTING.md) before opening a pull request. To run the
@@ -109,6 +118,7 @@ termswitch/
   param_form.py    the parameter form
   assets/          app icon in SVG, PNG, ICO, ICNS; icons/material/ (MIT)
   icons.py         Material Icon Theme icons for groups, tabs and the toolbar
+  legal.py         Help > Licenses viewer for the license and third-party notices
 tests/
 tools/build_icons.py
 .github/workflows/ ci.yml (tests), release.yml (builds and publishes downloads)

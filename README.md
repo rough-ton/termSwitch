@@ -10,7 +10,7 @@
   <a href="https://github.com/rough-ton/termSwitch/actions/workflows/ci.yml"><img src="https://github.com/rough-ton/termSwitch/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/rough-ton/termSwitch/releases/latest"><img src="https://img.shields.io/github/v/release/rough-ton/termSwitch" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-informational" alt="Windows and macOS">
-  <a href="https://github.com/rough-ton/termSwitch/issues/11"><img src="https://img.shields.io/badge/license-pending-lightgrey" alt="License pending"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
 </p>
 
 termSwitch is a desktop app for Windows and macOS that keeps your AWS profiles in a tree,
@@ -101,5 +101,6 @@ by Philipp Kief and Material Extensions, used under the MIT license. See
 
 ## License
 
-A project license is being chosen in
-[issue #11](https://github.com/rough-ton/termSwitch/issues/11).
+termSwitch is released under the [MIT license](LICENSE). The downloads bundle
+third-party software under its own licenses, including Qt for Python under the LGPL 3.0;
+see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), or Help > Licenses in the app.

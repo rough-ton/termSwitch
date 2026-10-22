@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +7,9 @@ name = "termswitch"
 dynamic = ["version"]
 description = "termSwitch: grouped AWS profiles that open authenticated terminals"
 requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "licenses/*.txt"]
+authors = [{ name = "Mike Roughton" }]
 dependencies = [
     "PySide6-Essentials>=6.6",
     "configupdater>=3.1",
