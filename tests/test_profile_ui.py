@@ -23,6 +23,15 @@ def store(tmp_path: Path) -> ProfileStore:
     return s
 
 
+def close_window(w, app):
+    """Close and delete a main window now, so its start-up timers can't start
+    background jobs during later tests."""
+    from PySide6.QtCore import QEvent
+    w.close()
+    w.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
+
+
 @pytest.fixture
 def window(qapp, store, tmp_path, monkeypatch):
     from termswitch import ui
@@ -31,8 +40,7 @@ def window(qapp, store, tmp_path, monkeypatch):
     monkeypatch.setattr(ui.MainWindow, "run_dependency_check", lambda *a, **k: None)
     w = ui.MainWindow(store=store, settings=settings)
     yield w
-    w.terminals.close_all()
-    w.deleteLater()
+    close_window(w, qapp)
 
 
 # ---- ProfileDialog ----------------------------------------------------------
@@ -162,7 +170,7 @@ def test_welcome_panel_when_no_profiles(qapp, tmp_path, monkeypatch):
     w = ui.MainWindow(store=s, settings=settings)
     assert w.left_stack.currentWidget() is w.welcome
     assert "There is no AWS config file yet" in w.welcome.body.text()
-    w.close()
+    close_window(w, qapp)
 
 
 def test_new_edit_rename_delete_and_undo(window, monkeypatch, qapp):
@@ -269,3 +277,33 @@ def test_setup_tab_runs_aws_configure_sso(window, monkeypatch):
     info = window.terminals.current_info()
     assert info.profile is None and info.title == "aws configure sso"
     window.terminals.close_all()
+
+
+def test_closing_the_window_stops_background_jobs(qapp, store, tmp_path, monkeypatch):
+    """Quitting while the command list loads or checks run must not leave Python
+    threads running into Qt's shutdown (that crashed at exit)."""
+    import threading
+    import time
+
+    from PySide6.QtCore import QThreadPool
+
+    from termswitch import commands_pane, ui
+    started = threading.Event()
+
+    def slow_catalog(force=False, progress=None):
+        started.set()
+        for i in range(200):
+            progress(i, 200)          # raises once the pane is shut down
+            time.sleep(0.02)
+        raise AssertionError("the load was not cancelled")
+    monkeypatch.setattr(commands_pane, "load_catalog", slow_catalog)
+    settings = QSettings(str(tmp_path / "ui.ini"), QSettings.Format.IniFormat)
+    settings.setValue("check_on_startup", False)
+    monkeypatch.setattr(ui.MainWindow, "run_dependency_check", lambda *a, **k: None)
+    w = ui.MainWindow(store=store, settings=settings)
+    w.commands.load()
+    assert started.wait(5)
+    t0 = time.monotonic()
+    close_window(w, qapp)
+    assert QThreadPool.globalInstance().activeThreadCount() == 0
+    assert time.monotonic() - t0 < 3

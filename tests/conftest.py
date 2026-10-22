@@ -24,7 +24,8 @@ def qapp():
     yield app
     # Tear Qt down in order. Widgets that outlive the QApplication crash the
     # interpreter at exit (seen as a segfault on Linux and exit code 1 on Windows).
-    QThreadPool.globalInstance().waitForDone(5000)
+    QThreadPool.globalInstance().clear()
+    QThreadPool.globalInstance().waitForDone(30000)
     icon_filter = getattr(app, "_termswitch_icon_filter", None)
     if icon_filter is not None:
         app.removeEventFilter(icon_filter)

@@ -4,6 +4,8 @@ a thin tab on the window's right edge."""
 
 from __future__ import annotations
 
+import threading
+
 from PySide6.QtCore import (QAbstractListModel, QEvent, QModelIndex, QObject, QRunnable, QSize,
                             QThreadPool, Qt, QTimer, Signal)
 from PySide6.QtGui import (QColor, QFont, QGuiApplication, QKeySequence, QPainter, QPalette,
@@ -34,18 +36,29 @@ class _LoaderSignals(QObject):
     done = Signal(object)
 
 
+class _Cancelled(Exception):
+    pass
+
+
 class _LoadJob(QRunnable):
-    def __init__(self, force: bool, signals: _LoaderSignals):
+    def __init__(self, force: bool, signals: _LoaderSignals, cancel: threading.Event):
         super().__init__()
-        self.force, self.signals = force, signals
+        self.force, self.signals, self.cancel = force, signals, cancel
+
+    def _progress(self, i: int, n: int):
+        if self.cancel.is_set():
+            raise _Cancelled()        # the pane is closing: stop between models
+        self.signals.progress.emit(i, n)
 
     def run(self):
         try:
-            cat = load_catalog(force=self.force,
-                               progress=lambda i, n: self.signals.progress.emit(i, n))
+            cat = load_catalog(force=self.force, progress=self._progress)
+        except _Cancelled:
+            return
         except Exception as exc:     # never let a bad model crash the app
             cat = Catalog(notice=f"Could not read AWS CLI commands: {exc}")
-        self.signals.done.emit(cat)
+        if not self.cancel.is_set():
+            self.signals.done.emit(cat)
 
 
 # --------------------------------------------------------------------------
@@ -276,6 +289,7 @@ class CommandsPane(QWidget):
         self._signals.progress.connect(self._on_progress)
         self._signals.done.connect(self._on_loaded)
         self._loading = False
+        self._cancel = threading.Event()
         self._on_current(QModelIndex())
 
     # ---- loading ---------------------------------------------------------
@@ -287,7 +301,11 @@ class CommandsPane(QWidget):
         self.refresh.setEnabled(False)
         self.status.setText("Reading the installed AWS CLI...")
         self.status.show()
-        QThreadPool.globalInstance().start(_LoadJob(force, self._signals))
+        QThreadPool.globalInstance().start(_LoadJob(force, self._signals, self._cancel))
+
+    def shutdown(self):
+        """Stop a running catalog load; called when the window closes."""
+        self._cancel.set()
 
     def _on_progress(self, i: int, n: int):
         if i % 25 == 0 or i == n:

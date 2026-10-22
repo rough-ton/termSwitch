@@ -1970,6 +1970,20 @@ class MainWindow(QMainWindow):
     def show_licenses(self, start: str | None = None):
         LicensesDialog(self, start=start).exec()
 
+    def shutdown_background_work(self, timeout_ms: int = 5000):
+        """Cancel queued jobs and wait briefly for running ones (catalog load,
+        dependency and status checks). Python worker threads still running when
+        Qt and the interpreter shut down can crash the app on quit."""
+        from PySide6.QtCore import QThreadPool
+        for timer in (self._reload_timer,):
+            timer.stop()
+        self.commands.shutdown()
+        pools = (QThreadPool.globalInstance(), self.checker.pool)
+        for pool in pools:
+            pool.clear()
+        for pool in pools:
+            pool.waitForDone(timeout_ms)
+
     def closeEvent(self, event):
         running = self.terminals.running_count()
         if running:
@@ -1980,6 +1994,7 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
         self.terminals.close_all()
+        self.shutdown_background_work()
         self.store.discard_undo()
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("main_splitter_v2", self.splitter.saveState())
