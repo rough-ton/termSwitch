@@ -412,8 +412,8 @@ four tabs:
 | Tab | What's in it |
 | --- | --- |
 | General | Theme, whether profiles open in a tab or an external terminal, single-click opening |
-| Terminal | Color scheme, font, scrollback, Powerline separators, close and paste prompts, the external terminal |
-| Profiles | Credential checks and SSO login, exporting credentials, grouping untagged profiles, the production pattern |
+| Terminal | Theme (scheme and preview), font, scrollback, Powerline separators, close and paste prompts, the external terminal |
+| Profiles | A section per cloud provider: AWS (credential checks and SSO login, exporting credentials, grouping untagged profiles), with Azure, GCP and OCI marked "Feature coming soon"; and the production pattern, which applies to all providers |
 | Dependencies | Checking for newer versions, showing warnings at startup, and running the check now |
 
 termSwitch reopens Settings on the tab you used last.
@@ -421,7 +421,7 @@ termSwitch reopens Settings on the tab you used last.
 - **Theme** (General): Follow system (the default), Light or Dark. termSwitch looks the
   same on Windows and macOS in each. With Follow system, it switches when the OS does,
   without a restart.
-- **Color scheme** (Terminal): the colors of terminal tabs. A preview shows the
+- **Scheme** (Terminal > Theme): the colors of terminal tabs. A preview shows the
   prompt colors and all 16 palette colors.
   - **Match the app theme** (the default) uses the built-in Light scheme with the light
     theme, and Dark with the dark theme.
@@ -444,7 +444,8 @@ To give one profile its own colors, right-click it > **Terminal colors** and pic
 scheme, for example High contrast for production. **Default** goes back to the setting
 above. The choice is saved in `~/.aws/config` as `x_term_scheme`, next to `x_group`.
 
-Changes apply to open tabs right away; the shells keep running.
+Changes are applied to open tabs immediately, while Settings is still open, and the
+shells keep running. **Cancel** puts the previous look back.
 
 Schemes only color termSwitch's own tabs. Choosing one never changes Windows Terminal,
 iTerm2, Terminal.app or your shell's startup files, and nothing is sent to the running

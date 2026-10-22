@@ -346,3 +346,82 @@ def test_settings_action_text(qapp, tmp_path, monkeypatch):
     finally:
         w.close()
         w.deleteLater()
+
+
+def test_terminal_tab_labels(dialog):
+    from PySide6.QtWidgets import QGroupBox
+    groups = [g.title() for g in dialog.tabs.widget(1).findChildren(QGroupBox)]
+    assert groups[0] == "Theme" and "Colors" not in groups
+    form = dialog.term_scheme.parentWidget().layout()
+    assert form.labelForField(dialog.term_scheme).text() == "Scheme:"
+    dialog.term_scheme.setCurrentIndex(dialog.term_scheme.findData("Dracula"))
+    assert dialog.scheme_note.text().startswith(
+        "Changes are applied to open tabs immediately.")
+
+
+def test_profiles_tab_has_a_section_per_provider(dialog):
+    from PySide6.QtWidgets import QGroupBox, QLabel
+    page = dialog.tabs.widget(2)
+    titles = [g.title() for g in page.findChildren(QGroupBox)]
+    assert titles == ["AWS", "Production (all providers)", "Azure", "GCP", "OCI"]
+    for name in ("Azure", "GCP", "OCI"):
+        box = next(g for g in page.findChildren(QGroupBox) if g.title() == name)
+        assert [w.text() for w in box.findChildren(QLabel)] == ["Feature coming soon"]
+    aws = next(g for g in page.findChildren(QGroupBox) if g.title() == "AWS")
+    for w in (dialog.check_startup, dialog.auto_login, dialog.export, dialog.auto_group):
+        assert aws.isAncestorOf(w)
+
+
+def test_terminal_changes_apply_to_open_tabs_immediately(qapp, tmp_path, monkeypatch):
+    from termswitch import ui
+    from termswitch.config_store import ProfileStore
+    from termswitch.terminal_tabs import TabInfo
+    from termswitch.terminal_widget import TerminalWidget
+    cfg = tmp_path / "config"
+    cfg.write_text("[profile a]\nregion = us-west-2\n", encoding="utf-8")
+    settings = QSettings(str(tmp_path / "ui.ini"), QSettings.Format.IniFormat)
+    settings.setValue("check_on_startup", False)
+    settings.setValue("app_theme", "dark")
+    monkeypatch.setattr(ui.MainWindow, "run_dependency_check", lambda *a, **k: None)
+    w = ui.MainWindow(store=ProfileStore(cfg, tmp_path / "credentials"), settings=settings)
+    term = TerminalWidget(["/bin/sh", "-c", "true"], {})
+    w.terminals._infos[id(term)] = TabInfo(w.store.profiles["a"], None, term, "a")
+    w.terminals.tabs.addTab(term, "a")
+    w.terminals.apply_schemes(w.store.profiles)
+    original_size = term._font.pointSize()
+    seen = {}
+
+    def run(dlg, accept):
+        dlg.term_scheme.setCurrentIndex(dlg.term_scheme.findData("Nord"))
+        seen["scheme"] = term.scheme.name                       # before OK
+        dlg.font_size.setValue(original_size + 4)
+        seen["size"] = term._font.pointSize()
+        dlg.powerline.setChecked(False)
+        seen["powerline"] = TerminalWidget.draw_powerline
+        if accept:
+            dlg._save()
+            return QDialog.DialogCode.Accepted
+        dlg.reject()
+        return QDialog.DialogCode.Rejected
+
+    from PySide6.QtWidgets import QDialog
+    try:
+        monkeypatch.setattr(ui.SettingsDialog, "exec", lambda dlg: run(dlg, accept=False))
+        w.open_settings()
+        assert seen == {"scheme": "Nord", "size": original_size + 4, "powerline": False}
+        # Cancel puts everything back.
+        assert term.scheme.name == "Dark" and term._font.pointSize() == original_size
+        assert TerminalWidget.draw_powerline is True
+        assert w._live_settings is None
+        monkeypatch.setattr(ui.SettingsDialog, "exec", lambda dlg: run(dlg, accept=True))
+        w.open_settings()
+        assert term.scheme.name == "Nord" and term._font.pointSize() == original_size + 4
+        assert settings.value("term_scheme") == "Nord"
+    finally:
+        settings.setValue("term_powerline", True)
+        w._apply_terminal_settings()
+        w.terminals.tabs.clear()
+        w.terminals._infos.clear()
+        w.theme.apply("light")
+        w.close()
+        w.deleteLater()

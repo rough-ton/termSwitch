@@ -97,6 +97,9 @@ DEFAULTS = {
 
 OPEN_MODES = [("embedded", "Embedded tab in termSwitch"), ("external", "External terminal")]
 
+# Cloud providers shown as "Feature coming soon" in Settings > Profiles.
+CLOUD_PROVIDERS_COMING = ("Azure", "GCP", "OCI")
+
 KIND_LABELS = {"sso": "IAM Identity Center (SSO)", "role": "Assume role",
                "process": "credential_process", "static": "Static access keys",
                "other": "Other"}
@@ -298,6 +301,9 @@ class SettingsDialog(QDialog):
     TAB_KEY = "settings_tab"
 
     check_now_requested = Signal()
+    # Terminal appearance while the dialog is open, so open tabs change immediately:
+    # a dict of settings keys to values, or None when the dialog closes.
+    live_changed = Signal(object)
 
     def __init__(self, settings: QSettings, parent=None, schemes: dict | None = None,
                  system_scheme=None):
@@ -364,10 +370,10 @@ class SettingsDialog(QDialog):
 
     def _terminal_tab(self) -> QWidget:
         s = self.settings
-        colors, form = self._group("Colors")
+        colors, form = self._group("Theme")
         self.term_scheme = QComboBox()
         self.term_scheme.currentIndexChanged.connect(self._scheme_changed)
-        form.addRow("Color scheme:", self.term_scheme)
+        form.addRow("Scheme:", self.term_scheme)
         self.scheme_note = QLabel()
         self.scheme_note.setWordWrap(True)
         theme.set_role(self.scheme_note, "hint")
@@ -417,6 +423,10 @@ class SettingsDialog(QDialog):
             "Turn off to use your font's own separator shapes.")
         self.powerline.setChecked(get_setting(s, "term_powerline"))
         form.addRow("", self.powerline)
+        # Restyle open tabs as these change. term_scheme is connected in _fill_schemes.
+        self.font_family.currentFontChanged.connect(self._emit_live)
+        self.font_size.valueChanged.connect(self._emit_live)
+        self.powerline.toggled.connect(self._emit_live)
 
         behavior, form = self._group("Behavior")
         self.confirm_close = QCheckBox("Ask before closing a tab that is running a command")
@@ -439,7 +449,7 @@ class SettingsDialog(QDialog):
 
     def _profiles_tab(self) -> QWidget:
         s = self.settings
-        creds, form = self._group("Credentials")
+        creds, form = self._group("AWS")
         self.check_startup = QCheckBox("Check credential status on startup")
         self.check_startup.setChecked(get_setting(s, "check_on_startup"))
         form.addRow(self.check_startup)
@@ -452,15 +462,13 @@ class SettingsDialog(QDialog):
                                "that do not read AWS_PROFILE.")
         self.export.setChecked(get_setting(s, "export_credentials"))
         form.addRow(self.export)
-
-        tree, form = self._group("Profile tree")
         self.auto_group = QComboBox()
         for value, label in AUTO_GROUP_MODES:
             self.auto_group.addItem(label, value)
         self._select(self.auto_group, get_setting(s, "auto_group"))
         form.addRow("Group untagged profiles by:", self.auto_group)
 
-        prod, form = self._group("Production")
+        prod, form = self._group("Production (all providers)")
         self.prod_pattern = QLineEdit(get_setting(s, "prod_pattern"))
         self.prod_pattern.setToolTip("Case-insensitive regex matched against the profile name. "
                                      "Matches are shown in red and get a red tab color. "
@@ -469,7 +477,17 @@ class SettingsDialog(QDialog):
         self.confirm_prod = QCheckBox("Ask before opening production profiles")
         self.confirm_prod.setChecked(get_setting(s, "confirm_prod"))
         form.addRow("", self.confirm_prod)
-        return self._page(creds, tree, prod)
+
+        # Other clouds: placeholders until they're supported (issue #22).
+        coming = []
+        for name in CLOUD_PROVIDERS_COMING:
+            box, form = self._group(name)
+            label = QLabel("Feature coming soon")
+            theme.set_role(label, "hint")
+            form.addRow(label)
+            box.setObjectName(f"provider-{name.lower()}")
+            coming.append(box)
+        return self._page(creds, prod, *coming)
 
     def _dependencies_tab(self) -> QWidget:
         s = self.settings
@@ -520,6 +538,7 @@ class SettingsDialog(QDialog):
         return self.system_scheme
 
     def _scheme_changed(self, *_):
+        self._emit_live()
         choice = self.term_scheme.currentData()
         imported = bool(choice in self.schemes and not self.schemes[choice].builtin)
         self.remove_btn.setEnabled(imported)
@@ -540,9 +559,25 @@ class SettingsDialog(QDialog):
         elif imported:
             self.scheme_note.setText("Imported. Saved in termSwitch's data folder.")
         else:
-            self.scheme_note.setText("Changes apply to open tabs right away. Only termSwitch's "
-                                     "tabs change; your other terminals keep their colors.")
+            self.scheme_note.setText("Changes are applied to open tabs immediately. Only "
+                                     "termSwitch's tabs change; your other terminals keep "
+                                     "their colors.")
         self.preview.set_scheme(scheme_for(choice, theme.current(), self.schemes))
+
+    def live_values(self) -> dict:
+        return {"term_scheme": self.term_scheme.currentData(),
+                "term_font_family": self.font_family.currentFont().family(),
+                "term_font_size": self.font_size.value(),
+                "term_powerline": self.powerline.isChecked()}
+
+    def _emit_live(self, *_):
+        if hasattr(self, "powerline"):           # the Terminal tab is fully built
+            self.live_changed.emit(self.live_values())
+
+    def done(self, result):
+        # Saved or not, the window goes back to reading the settings.
+        self.live_changed.emit(None)
+        super().done(result)
 
     def _import_scheme(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -666,6 +701,7 @@ class MainWindow(QMainWindow):
         self.theme.changed.connect(self._on_theme_changed)
         self.schemes = all_schemes()
         self._system_cache: SystemScheme | None = None
+        self._live_settings: dict | None = None
         self.ssh_store = SessionStore()
         self.passwords = PasswordStore()
         self.expanded: set[str] = set(self.settings.value("expanded", [], type=list) or [])
@@ -1024,13 +1060,28 @@ class MainWindow(QMainWindow):
     def _scheme_for(self, profile: Profile | None):
         """Terminal colors for a tab: the profile's own scheme, else the default."""
         choice = (profile.term_scheme if profile is not None and profile.term_scheme
-                  else get_setting(self.settings, "term_scheme"))
+                  else self._setting("term_scheme"))
         if choice == MATCH_SYSTEM:
             found = self._system_scheme()
             if found.scheme is not None:
                 return found.scheme
             choice = MATCH_APP                   # couldn't read it: follow the app theme
         return scheme_for(choice, theme.current(), self.schemes)
+
+    def _setting(self, key: str):
+        """A setting, or the value being tried in the open Settings dialog."""
+        if self._live_settings and key in self._live_settings:
+            return self._live_settings[key]
+        return get_setting(self.settings, key)
+
+    def _preview_settings(self, values: dict | None) -> None:
+        """Apply terminal appearance from the Settings dialog to open tabs now."""
+        self._live_settings = values
+        if values and values.get("term_scheme") not in (None, MATCH_APP, MATCH_SYSTEM) \
+                and values["term_scheme"] not in self.schemes:
+            self.schemes = all_schemes()             # just imported in the dialog
+        self._apply_terminal_settings()
+        self.terminals.apply_schemes(self.store.profiles)
 
     def _system_scheme(self) -> SystemScheme:
         """The user's own terminal colors, read once and again after a theme or
@@ -1452,12 +1503,12 @@ class MainWindow(QMainWindow):
 
     def _apply_terminal_settings(self):
         t = self.terminals
-        t.font = default_font(get_setting(self.settings, "term_font_family"),
-                              get_setting(self.settings, "term_font_size"))
+        t.font = default_font(self._setting("term_font_family"),
+                              self._setting("term_font_size"))
         t.scrollback = get_setting(self.settings, "term_scrollback")
         t.confirm_close = get_setting(self.settings, "confirm_close_tab")
         t.confirm_multiline_paste = get_setting(self.settings, "confirm_multiline_paste")
-        TerminalWidget.draw_powerline = get_setting(self.settings, "term_powerline")
+        TerminalWidget.draw_powerline = self._setting("term_powerline")
         for term in t.terminals():
             term.set_font(t.font)
             term.confirm_multiline_paste = t.confirm_multiline_paste
@@ -2633,6 +2684,7 @@ class MainWindow(QMainWindow):
     def open_settings(self):
         dlg = SettingsDialog(self.settings, self, schemes=self.schemes)
         dlg.check_now_requested.connect(lambda: self.run_dependency_check(startup=False))
+        dlg.live_changed.connect(self._preview_settings)
         if dlg.exec():
             self.schemes = all_schemes()
             self._system_cache = None
