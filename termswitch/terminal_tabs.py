@@ -22,10 +22,11 @@ def _color_icon(color: str | None, exited: bool = False) -> QIcon:
 
 @dataclass
 class TabInfo:
-    profile: Profile
-    options: LaunchOptions
+    profile: Profile | None          # None for setup tabs that run one command
+    options: LaunchOptions | None
     widget: TerminalWidget
     title: str
+    orphaned: bool = False           # the profile was deleted or renamed since
 
 
 class TerminalTabs(QStackedWidget):
@@ -87,6 +88,42 @@ class TerminalTabs(QStackedWidget):
         term.setFocus()
         self.count_changed.emit(self.tabs.count())
         return term
+
+    def open_command(self, title: str, argv: list[str], env: dict[str, str],
+                     tooltip: str = "") -> TerminalWidget:
+        """A tab that runs one command with no profile, for setup tasks such as
+        ``aws configure sso``. It isn't restarted or duplicated as a profile tab."""
+        term = TerminalWidget(argv, env, font=self.font, scrollback=self.scrollback,
+                              confirm_multiline_paste=self.confirm_multiline_paste)
+        info = TabInfo(None, None, term, title)
+        self._infos[id(term)] = info
+        idx = self.tabs.addTab(term, _color_icon(None), title)
+        self.tabs.setTabToolTip(idx, tooltip or title)
+        term.exited.connect(lambda code, t=term: self._on_exited(t, code))
+        self.setCurrentWidget(self.tabs)
+        self.tabs.setCurrentIndex(idx)
+        term.start()
+        term.setFocus()
+        self.count_changed.emit(self.tabs.count())
+        return term
+
+    def mark_profile_gone(self, name: str, note: str) -> int:
+        """Mark tabs of a deleted or renamed profile. Their shells keep running with
+        the old AWS_PROFILE, so the tab says so and can't be duplicated."""
+        count = 0
+        for i in range(self.tabs.count()):
+            term = self.tabs.widget(i)
+            info = self._infos.get(id(term))
+            if not info or not info.profile or info.orphaned or info.profile.name != name:
+                continue
+            info.orphaned = True
+            info.title = f"{info.title} ({note})"
+            self.tabs.setTabText(i, info.title + ("" if term.is_alive() else " (exited)"))
+            self.tabs.setTabToolTip(
+                i, f"{self.tabs.tabToolTip(i)}\nProfile {note}. This shell still uses "
+                   f"AWS_PROFILE={name}; open a new tab for the current profile.")
+            count += 1
+        return count
 
     @staticmethod
     def _tooltip(profile: Profile) -> str:
@@ -175,14 +212,18 @@ class TerminalTabs(QStackedWidget):
         if not info:
             return
         menu = QMenu(self)
-        menu.addAction("Duplicate tab", lambda: self.open_profile(info.profile, info.options))
+        live_profile = info.profile is not None and not info.orphaned
+        if live_profile:
+            menu.addAction("Duplicate tab", lambda: self.open_profile(info.profile, info.options))
         if not term.is_alive():
             menu.addAction("Restart", lambda: self._restart(term))
         menu.addAction("Rename tab...", lambda: self._rename(idx))
-        menu.addAction("Open in external terminal",
-                       lambda: self.open_external_requested.emit(info.profile))
-        menu.addAction("Copy profile name",
-                       lambda: QGuiApplication.clipboard().setText(info.profile.name))
+        if live_profile:
+            menu.addAction("Open in external terminal",
+                           lambda: self.open_external_requested.emit(info.profile))
+        if info.profile is not None:
+            menu.addAction("Copy profile name",
+                           lambda: QGuiApplication.clipboard().setText(info.profile.name))
         menu.addSeparator()
         menu.addAction("Close tab", lambda: self.close_tab(self._index_of(term)))
         if self.tabs.count() > 1:
@@ -194,7 +235,7 @@ class TerminalTabs(QStackedWidget):
         idx = self._index_of(term)
         if info and idx >= 0:
             self.tabs.setTabText(idx, info.title)
-            self.tabs.setTabIcon(idx, _color_icon(info.options.tab_color))
+            self.tabs.setTabIcon(idx, _color_icon(info.options.tab_color if info.options else None))
         term.restart()
         self.terminal_state_changed.emit()
 
