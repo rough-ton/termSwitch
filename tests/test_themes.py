@@ -79,7 +79,7 @@ def test_no_hard_coded_colors_in_ui_code():
     for path in (ROOT / "termswitch").glob("*.py"):
         if path.name in allowed_files:
             continue
-        for m in re.finditer(r"#[0-9a-fA-F]{6}\b", path.read_text()):
+        for m in re.finditer(r"#[0-9a-fA-F]{6}\b", path.read_text(encoding="utf-8")):
             if m.group(0).lower() not in allowed:
                 found.append(f"{path.name}: {m.group(0)}")
     assert not found, found
@@ -145,12 +145,14 @@ WT = {"name": "Campbell Powershell", "foreground": "#CCCCCC", "background": "#01
 
 def test_import_windows_terminal(tmp_path):
     single = tmp_path / "scheme.json"
-    single.write_text(json.dumps(WT))
+    single.write_text(json.dumps(WT), encoding="utf-8")
     [s] = ts.import_file(single)
     assert s.name == "Campbell Powershell" and s.background == "#012456"
     assert s.ansi[5] == "#881798"                         # purple is magenta
     settings = tmp_path / "settings.json"
-    settings.write_text("﻿" + json.dumps({"profiles": {}, "schemes": [WT, {**WT, "name": "B"}]}))
+    # Windows Terminal saves settings.json with a byte order mark.
+    data = {"profiles": {}, "schemes": [WT, {**WT, "name": "B"}]}
+    settings.write_text("\ufeff" + json.dumps(data), encoding="utf-8")
     assert [x.name for x in ts.import_file(settings)] == ["Campbell Powershell", "B"]
 
 
@@ -159,7 +161,7 @@ def test_import_windows_terminal(tmp_path):
     json.dumps({**WT, "name": "bad\nname"})])
 def test_import_windows_terminal_rejects_bad_files(tmp_path, content):
     f = tmp_path / "bad.json"
-    f.write_text(content)
+    f.write_text(content, encoding="utf-8")
     with pytest.raises(ts.SchemeError):
         ts.import_file(f)
 
@@ -202,7 +204,7 @@ def test_save_and_load_user_schemes(tmp_path):
     [s] = ts.import_windows_terminal(_write(tmp_path / "a.json", WT))
     path = ts.save_user_scheme(s, tmp_path / "schemes")
     assert path.name == "Campbell_Powershell.json"
-    (tmp_path / "schemes" / "broken.json").write_text("{nope")
+    (tmp_path / "schemes" / "broken.json").write_text("{nope", encoding="utf-8")
     loaded = ts.load_user_schemes(tmp_path / "schemes")
     assert list(loaded) == ["Campbell Powershell"] and loaded[s.name] == s
     with pytest.raises(ts.SchemeError):
@@ -210,7 +212,7 @@ def test_save_and_load_user_schemes(tmp_path):
 
 
 def _write(path: Path, data) -> Path:
-    path.write_text(json.dumps(data))
+    path.write_text(json.dumps(data), encoding="utf-8")
     return path
 
 
@@ -229,11 +231,11 @@ def test_terminal_recolors_in_place(qapp):
 def test_profile_scheme_round_trip(tmp_path):
     from termswitch.config_store import ConfigError, ProfileStore
     cfg = tmp_path / "config"
-    cfg.write_text("[profile a]\nregion = us-west-2\n")
+    cfg.write_text("[profile a]\nregion = us-west-2\n", encoding="utf-8")
     store = ProfileStore(cfg, tmp_path / "credentials")
     store.load()
     store.set_profile_scheme("a", "High contrast")
-    assert "x_term_scheme = High contrast" in cfg.read_text()
+    assert "x_term_scheme = High contrast" in cfg.read_text(encoding="utf-8")
     assert store.profiles["a"].term_scheme == "High contrast"
     store.set_profile_scheme("a", None)
     assert store.profiles["a"].term_scheme is None
@@ -249,7 +251,8 @@ def test_main_window_schemes_and_theme_switch(qapp, tmp_path, monkeypatch):
     from termswitch.terminal_tabs import TabInfo
     from termswitch.terminal_widget import TerminalWidget
     cfg = tmp_path / "config"
-    cfg.write_text("[profile a]\nregion = us-west-2\n[profile b]\nregion = us-east-1\n")
+    cfg.write_text("[profile a]\nregion = us-west-2\n[profile b]\nregion = us-east-1\n",
+                   encoding="utf-8")
     store = ProfileStore(cfg, tmp_path / "credentials")
     settings = QSettings(str(tmp_path / "ui.ini"), QSettings.Format.IniFormat)
     settings.setValue("check_on_startup", False)

@@ -16,6 +16,40 @@ def _isolated_settings(tmp_path_factory):
                       str(tmp_path_factory.mktemp("settings")))
 
 
+class UnexpectedDialog(AssertionError):
+    pass
+
+
+@pytest.fixture(autouse=True)
+def _no_unexpected_dialogs(monkeypatch):
+    """Fail fast if code under test opens a modal dialog the test didn't patch.
+
+    A real modal dialog waits for a click that never comes, so CI hangs until
+    the job times out with no hint of what was asked. Tests that expect a
+    dialog patch it themselves, which overrides these stand-ins.
+    """
+    from PySide6.QtWidgets import QDialog, QFileDialog, QInputDialog, QMessageBox
+
+    def refuse(kind):
+        def _raise(*args, **kwargs):
+            texts = [a for a in args if isinstance(a, str)]
+            if args and isinstance(args[0], QMessageBox):
+                texts = [args[0].windowTitle(), args[0].text()]
+            elif args and isinstance(args[0], QDialog):
+                texts = [args[0].windowTitle()]
+            raise UnexpectedDialog(f"unexpected {kind}: {' | '.join(t for t in texts if t)}")
+        return _raise
+
+    for name in ("critical", "warning", "information", "question", "about"):
+        monkeypatch.setattr(QMessageBox, name, refuse(f"QMessageBox.{name}"))
+    for name in ("getText", "getItem", "getInt", "getMultiLineText"):
+        monkeypatch.setattr(QInputDialog, name, refuse(f"QInputDialog.{name}"))
+    for name in ("getOpenFileName", "getSaveFileName", "getExistingDirectory"):
+        monkeypatch.setattr(QFileDialog, name, refuse(f"QFileDialog.{name}"))
+    monkeypatch.setattr(QMessageBox, "exec", refuse("QMessageBox"))
+    monkeypatch.setattr(QDialog, "exec", refuse("dialog"))
+
+
 @pytest.fixture(scope="session")
 def qapp():
     from PySide6.QtCore import QThreadPool
