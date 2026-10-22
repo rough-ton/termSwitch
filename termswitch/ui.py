@@ -24,7 +24,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QColo
 from .config_store import (SEP, ConfigError, Profile, ProfileStore, is_within, join_group,
                            leaf_name, natural_key, parent_group, safe_https_url)
 from .launcher import (TERMINAL_CHOICES, LaunchError, LaunchOptions, aws_setup_command,
-                       find_aws, find_ssh, launch, platform_key, ssh_env)
+                       find_aws, find_ssh, launch, local_command, platform_key,
+                       ssh_env)
 from .config_dialogs import (SECRETS_REFUSED, BackupsDialog, ConfigEditorDialog,
                              WelcomePanel)
 from .profile_dialogs import (KIND_ROLE, KIND_SSO, ProfileDialog, SsoSessionDialog,
@@ -44,6 +45,7 @@ from .icons import (AUTO_GROUP_ICONS, PROVIDER_DOT_CORNER, PROVIDER_ICONS, decor
                     install_icon_theme, shell_icon)
 from .aws_params import is_destructive, needs_confirmation
 from .commands_pane import CommandsPane, VerticalTab
+from .home_view import AppStatusBar, HomeItem, HomeView
 from .terminal_tabs import TerminalTabs
 from .terminal_widget import TerminalWidget, default_font
 from .status import CHECKING, ERROR, EXPIRED, UNKNOWN, VALID, StatusChecker, StatusResult
@@ -711,6 +713,8 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("termSwitch")
         self.resize(1280, 780)
+        # Keeps the name, version and support link visible at the bottom left.
+        self.setStatusBar(AppStatusBar(self))
 
         self.checker = StatusChecker(self)
         self.checker.status_ready.connect(self._on_status)
@@ -821,7 +825,13 @@ class MainWindow(QMainWindow):
         self.left_splitter.setStretchFactor(1, 2)
         self.left_splitter.setChildrenCollapsible(True)
 
-        self.terminals = TerminalTabs(self._placeholder_html())
+        self.home = HomeView()
+        self.home.open_requested.connect(self._open_home_item)
+        self.home.local_requested.connect(self.open_local_terminal)
+        self.home.new_profile_requested.connect(lambda: self.new_profile())
+        self.home.new_ssh_requested.connect(lambda: self.new_ssh_session())
+        self.home.reopen_requested.connect(self.reopen_previous_tabs)
+        self.terminals = TerminalTabs(home=self.home)
         self.terminals.open_external_requested.connect(
             lambda prof: self.open_profiles([prof], external=True))
         self.terminals.count_changed.connect(self._on_tab_count)
@@ -898,6 +908,10 @@ class MainWindow(QMainWindow):
         self.act_open_ext = action("Open in external terminal",
                                    lambda: self.open_selected(invert=None, external=True),
                                    QStyle.StandardPixmap.SP_ComputerIcon, "Ctrl+Shift+T")
+        self.act_local = action("New local terminal", self.open_local_terminal, None,
+                                "Ctrl+Shift+L")
+        self.act_local.setIcon(shell_icon())
+        self.act_local.setToolTip("Open a shell with no AWS profile or SSH session")
         self.act_close_tab = action("Close tab", self.close_current_tab, None,
                                     QKeySequence.StandardKey.Close if platform_key() == "darwin"
                                     else "Ctrl+Shift+W")
@@ -946,6 +960,8 @@ class MainWindow(QMainWindow):
                                              self.use_default_config_file)
 
         menu_file = self.menuBar().addMenu("&File")
+        menu_file.addAction(self.act_local)
+        menu_file.addSeparator()
         menu_file.addAction(self.act_reload)
         menu_file.addSeparator()
         menu_file.addAction(action("Set up AWS SSO...", self.setup_sso))
@@ -1031,8 +1047,6 @@ class MainWindow(QMainWindow):
         self._watch()
         self.rebuild()
         self._update_left_view()
-        self.statusBar().showMessage(
-            f"{len(self.store.profiles)} profiles from {self.store.config_file}", 5000)
 
     def _watch(self):
         paths = [str(self.store.config_file), str(self.store.config_file.parent),
@@ -1099,7 +1113,7 @@ class MainWindow(QMainWindow):
 
     def _on_theme_changed(self, _effective: str):
         self._system_cache = None                # light and dark can differ
-        self.terminals.placeholder.setText(self._placeholder_html())
+        self.statusBar().footer.refresh()
         self.rebuild()
         self.terminals.apply_schemes(self.store.profiles)
         self.commands.model.layoutChanged.emit()
@@ -1220,6 +1234,7 @@ class MainWindow(QMainWindow):
         self._tracking = True
         self._apply_filter(self.filter.text())
         self._show_details()
+        self._refresh_home()
 
     def _build_ssh_items(self, group_item) -> dict[str, QTreeWidgetItem]:
         """SSH sessions go in the shared folders (``group_item(path)``). Sessions in no
@@ -1472,6 +1487,7 @@ class MainWindow(QMainWindow):
         names = ", ".join(p.name for p in profiles)
         where = "external terminal" if use_external else "tab"
         self.statusBar().showMessage(f"Opened {where}: {names}", 4000)
+        self._remember_recent([f"aws:{p.name}" for p in reversed(profiles)])
 
     def open_selected(self, invert: bool | None = False, external: bool | None = None):
         self.open_profiles(self.selected_profiles(), external=external, invert=invert)
@@ -1597,13 +1613,104 @@ class MainWindow(QMainWindow):
     def _on_tab_count(self, count: int):
         self.act_close_tab.setEnabled(count > 0)
 
-    def _placeholder_html(self) -> str:
-        return (f"<div style='color:{theme.colors().hint}'>"
-                "<h2>No terminals open</h2>"
-                "<p>Double-click a profile to open it in a tab here.<br>"
-                "Shift+double-click opens it in an external terminal instead.</p>"
-                "<p><code>Ctrl+Tab</code> next tab &nbsp; <code>Ctrl+1</code> / "
-                "<code>Ctrl+2</code> profiles / terminal</p></div>")
+    # ---- home view -------------------------------------------------------
+
+    RECENT_KEY = "home/recent"
+    LAST_TABS_KEY = "home/last_tabs"
+
+    def _home_items(self) -> list[HomeItem]:
+        items = [HomeItem(f"aws:{p.name}", p.name, material_icon(PROVIDER_ICONS["aws"]),
+                          f"Open AWS profile {p.name}")
+                 for p in sorted(self.store.profiles.values(), key=lambda p: p.name.lower())]
+        for s in sorted(self.ssh_store.all(), key=lambda s: s.name.lower()):
+            items.append(HomeItem(f"ssh:{s.id}", s.name,
+                                  material_icon(PROVIDER_ICONS["ssh"], dot=s.color),
+                                  f"Connect to {s.name} over SSH"))
+        return items
+
+    def _settings_list(self, key: str) -> list[str]:
+        value = self.settings.value(key, [], type=list) or []
+        return [v for v in value if isinstance(v, str)]
+
+    def _refresh_home(self) -> None:
+        self.home.set_items(self._home_items())
+        self.home.set_recent(self._settings_list(self.RECENT_KEY))
+        self.home.set_reopen_count(len(self._settings_list(self.LAST_TABS_KEY)))
+
+    def _remember_recent(self, keys: list[str]) -> None:
+        recent = self._settings_list(self.RECENT_KEY)
+        for key in keys:
+            if key in recent:
+                recent.remove(key)
+            recent.insert(0, key)
+        # Keep a few extra, so deleting an item doesn't leave the grid short.
+        self.settings.setValue(self.RECENT_KEY, recent[:30])
+        self._refresh_home()
+
+    def _resolve_keys(self, keys: list[str]) -> tuple[list[Profile], list[SshSession]]:
+        profiles, sessions = [], []
+        for key in keys:
+            kind, _, value = key.partition(":")
+            if kind == "aws" and value in self.store.profiles:
+                profiles.append(self.store.profiles[value])
+            elif kind == "ssh" and (s := self.ssh_store.get(value)) is not None:
+                sessions.append(s)
+        return profiles, sessions
+
+    def _open_home_item(self, key: str) -> None:
+        profiles, sessions = self._resolve_keys([key])
+        if profiles:
+            self.open_profiles(profiles)
+        for s in sessions:
+            self.connect_ssh(s)
+
+    def _open_tab_keys(self) -> list[str]:
+        """Profiles and SSH sessions open in tabs, in tab order."""
+        keys = []
+        for term in self.terminals.terminals():
+            info = self.terminals._infos.get(id(term))
+            if info is None or info.orphaned:
+                continue
+            if info.local:
+                keys.append("local")          # one per local tab
+                continue
+            if info.ssh_session is not None:
+                key = f"ssh:{info.ssh_session.id}"
+            elif info.profile is not None:
+                key = f"aws:{info.profile.name}"
+            else:
+                continue                      # one-off setup tabs
+            if key not in keys:
+                keys.append(key)
+        return keys
+
+    def _rename_home_key(self, old: str, new: str) -> None:
+        for setting in (self.RECENT_KEY, self.LAST_TABS_KEY):
+            keys = self._settings_list(setting)
+            if old in keys:
+                self.settings.setValue(setting, [new if k == old else k for k in keys])
+        self._refresh_home()
+
+    def open_local_terminal(self) -> None:
+        try:
+            argv, env, cwd = local_command()
+            self.terminals.open_local(argv, env, cwd)
+        except LaunchError as exc:
+            QMessageBox.warning(self, "Could not open terminal", str(exc))
+
+    def reopen_previous_tabs(self) -> None:
+        keys = self._settings_list(self.LAST_TABS_KEY)
+        profiles, sessions = self._resolve_keys(keys)
+        local = keys.count("local")
+        if not profiles and not sessions and not local:
+            self.statusBar().showMessage("None of the previous tabs exist any more.", 5000)
+            return
+        for _ in range(local):
+            self.open_local_terminal()
+        if profiles:
+            self.open_profiles(profiles, external=False)
+        for s in sessions:
+            self.connect_ssh(s)
 
     # ---- actions: status and login --------------------------------------
 
@@ -1969,6 +2076,7 @@ class MainWindow(QMainWindow):
         if self._write(self.store.rename_profile, prof.name, new, update):
             if prof.name in self.status:
                 self.status[new] = self.status.pop(prof.name)
+            self._rename_home_key(f"aws:{prof.name}", f"aws:{new}")
             n = self.terminals.mark_profile_gone(prof.name, "renamed")
             self._select_profile(new)
             note = f" {n} open tab(s) still use the old name." if n else ""
@@ -2289,6 +2397,7 @@ class MainWindow(QMainWindow):
             factory = self._autofill_factory(session)
         self.terminals.open_ssh(session, argv, ssh_env(), autofill_factory=factory,
                                 tooltip=display_command(argv))
+        self._remember_recent([f"ssh:{session.id}"])
 
     def _autofill_factory(self, session: SshSession):
         sid = session.id
@@ -2800,6 +2909,11 @@ class MainWindow(QMainWindow):
             if ok != QMessageBox.StandardButton.Yes:
                 event.ignore()
                 return
+        # Remember the open tabs for "Reopen previous tabs". Quitting with none open
+        # keeps the last set.
+        open_keys = self._open_tab_keys()
+        if open_keys:
+            self.settings.setValue(self.LAST_TABS_KEY, open_keys)
         self.terminals.close_all()
         self.shutdown_background_work()
         self.store.discard_undo()

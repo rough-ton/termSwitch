@@ -26,6 +26,9 @@ does to protect them, and what it can't protect against. To report a vulnerabili
   `AWS_PROFILE`. The shell is an absolute path:
   - Windows: `pwsh`, or the system PowerShell
   - macOS: your login shell, checked against `/etc/shells`
+- Local terminals (File > New local terminal) get the same scrubbed environment with no
+  `AWS_PROFILE`, so they use the AWS CLI's defaults unless your own shell startup files
+  set something else.
 
 - **Match my system terminal** reads Windows Terminal's `settings.json`, iTerm2's
   preferences or Terminal.app's preferences to copy their colors. They're only read,

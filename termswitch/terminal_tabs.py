@@ -30,16 +30,18 @@ class TabInfo:
     ssh_session: object = None       # SshSession for SSH tabs
     autofill: object = None          # PasswordAutofill for SSH tabs with a saved password
     autofill_factory: object = None
+    local: bool = False              # a plain local shell with no profile or session
 
 
 class TerminalTabs(QStackedWidget):
-    """Shows a placeholder when empty, otherwise the terminal tabs."""
+    """Shows a home view (or a placeholder message) when empty, otherwise the
+    terminal tabs."""
 
     open_external_requested = Signal(object)     # Profile
     count_changed = Signal(int)
     terminal_state_changed = Signal()            # a shell exited or restarted
 
-    def __init__(self, placeholder_html: str = "", parent=None):
+    def __init__(self, placeholder_html: str = "", parent=None, home: QWidget | None = None):
         super().__init__(parent)
         self.font = None
         self.scrollback = 10000
@@ -52,16 +54,20 @@ class TerminalTabs(QStackedWidget):
         # Maps a profile's tab color to the text color for the current theme.
         self.display_color = lambda color: color
 
-        self.placeholder = QLabel(placeholder_html)
-        self.placeholder.setWordWrap(True)
-        self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.placeholder.setTextFormat(Qt.TextFormat.RichText)
-        holder = QWidget()
-        lay = QVBoxLayout(holder)
-        lay.addStretch(1)
-        lay.addWidget(self.placeholder)
-        lay.addStretch(1)
-        self.addWidget(holder)
+        self.home = home
+        if home is not None:
+            self.addWidget(home)
+        else:
+            self.placeholder = QLabel(placeholder_html)
+            self.placeholder.setWordWrap(True)
+            self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.placeholder.setTextFormat(Qt.TextFormat.RichText)
+            holder = QWidget()
+            lay = QVBoxLayout(holder)
+            lay.addStretch(1)
+            lay.addWidget(self.placeholder)
+            lay.addStretch(1)
+            self.addWidget(holder)
 
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
@@ -137,6 +143,25 @@ class TerminalTabs(QStackedWidget):
             term.set_scheme(self.scheme_for(profile))
             if info and info.options is not None:
                 self._color_tab_text(self._index_of(term), info.options.tab_color)
+
+    def open_local(self, argv: list[str], env: dict[str, str], cwd: str | None = None,
+                   title: str = "Local") -> TerminalWidget:
+        """A tab with a plain local shell, not tied to an AWS profile or SSH session."""
+        term = TerminalWidget(argv, env, cwd=cwd, font=self.font, scrollback=self.scrollback,
+                              confirm_multiline_paste=self.confirm_multiline_paste)
+        if self.scheme_for:
+            term.set_scheme(self.scheme_for(None))
+        info = TabInfo(None, None, term, title, local=True)
+        self._infos[id(term)] = info
+        idx = self.tabs.addTab(term, _color_icon(None), title)
+        self.tabs.setTabToolTip(idx, "Local shell with no AWS profile")
+        term.exited.connect(lambda code, t=term: self._on_exited(t, code))
+        self.setCurrentWidget(self.tabs)
+        self.tabs.setCurrentIndex(idx)
+        term.start()
+        term.setFocus()
+        self.count_changed.emit(self.tabs.count())
+        return term
 
     def open_ssh(self, session, argv: list[str], env: dict[str, str], autofill_factory=None,
                  tooltip: str = ""):
@@ -278,6 +303,9 @@ class TerminalTabs(QStackedWidget):
         live_profile = info.profile is not None and not info.orphaned
         if live_profile:
             menu.addAction("Duplicate tab", lambda: self.open_profile(info.profile, info.options))
+        elif info.local:
+            menu.addAction("Duplicate tab",
+                           lambda: self.open_local(term.argv, term.env, term.cwd))
         if not term.is_alive():
             menu.addAction("Restart", lambda: self._restart(term))
         menu.addAction("Rename tab...", lambda: self._rename(idx))

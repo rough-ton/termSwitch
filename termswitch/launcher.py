@@ -542,6 +542,21 @@ def aws_setup_command(args: list[str], platform: str | None = None,
     return [aws, *args], terminal_env(platform)
 
 
+def local_command(platform: str | None = None) -> tuple[list[str], dict[str, str], str]:
+    """argv, environment and starting folder for a plain local shell in a tab, with
+    no AWS profile or SSH session.
+
+    It gets the same scrubbed environment as every other tab, so AWS keys and
+    AWS_PROFILE inherited by termSwitch don't leak into it. The user's own startup
+    files run as usual and may set their own."""
+    env = terminal_env(platform)
+    home = os.path.expanduser("~")
+    if platform_key(platform) == "win32":
+        shell = _which("pwsh", platform) or system_powershell()
+        return [shell, "-NoLogo"], env, home
+    return [user_shell(platform), "-l"], env, home
+
+
 def embedded_command(profile: Profile, opts: LaunchOptions, platform: str | None = None,
                      aws: str | None = None) -> tuple[list[str], dict[str, str]]:
     """argv and environment for a shell running inside a termSwitch tab."""

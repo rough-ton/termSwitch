@@ -114,6 +114,7 @@ termswitch/
   icon.py          app icon, Windows taskbar identity
   ui.py            main window, drag-and-drop tree, settings
   terminal_tabs.py embedded terminal tabs
+  home_view.py     home view when no tabs are open, footer and status bar
   terminal_widget.py  terminal view: painting, keys, selection, clipboard
   terminal_core.py screen model (scrollback, alternate screen), key encoding, paste safety
   pty_backend.py   ConPTY (Windows) and POSIX pty processes
