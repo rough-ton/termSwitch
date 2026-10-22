@@ -2020,7 +2020,8 @@ class MainWindow(QMainWindow):
         sid = session.id
 
         def make(term):
-            return PasswordAutofill(session, lambda: self.passwords.get(sid), term.write_secret)
+            return PasswordAutofill(session, lambda: self.passwords.get(sid), term.write_secret,
+                                    screen=term.text_before_cursor)
         return make
 
     def new_ssh_session(self, group: str | None = None):

@@ -250,6 +250,51 @@ def test_never_answers_other_prompts(text):
     assert sent == [] and fetches == []
 
 
+class FakeScreen:
+    """Rows of a terminal screen, as TerminalWidget.text_before_cursor returns them."""
+
+    def __init__(self, cols=16):
+        self.cols, self.text = cols, ""
+
+    def show(self, *rows, cursor_x=None):
+        # Every row but the last is padded to the width; the last ends at the cursor.
+        padded = [r.ljust(self.cols)[:self.cols] for r in rows[:-1]]
+        last = rows[-1] if cursor_x is None else rows[-1].ljust(cursor_x)[:cursor_x]
+        self.text = "".join(padded) + last
+
+    def __call__(self):
+        return self.text, self.cols
+
+
+def screen_fill(screen):
+    sent = []
+    fill = ss.PasswordAutofill(sess(), lambda: "s3cret", sent.append, screen=screen)
+    return fill, sent
+
+
+def test_finds_a_prompt_that_windows_redrew():
+    # ConPTY wraps the prompt at the screen width, uses cursor moves instead of
+    # plain text, and drops the trailing space.
+    screen = FakeScreen(16)
+    fill, sent = screen_fill(screen)
+    screen.show("Warning: added", "deploy@web01.exa", "mple.com's passw", "ord:", cursor_x=5)
+    assert fill.feed("\x1b[2;1Hdeploy@web01.exa\x1b[3;1Hmple.com's passw\x1b[4;1Hord:")
+    assert sent == ["s3cret\r"]
+
+
+@pytest.mark.parametrize("rows", [
+    ("say deploy@web01", ".example.com's p", "assword:"),             # not at a row start
+    ("evil@web01.examp", "le.com's password", ":"),                    # another user
+    ("deploy@web01.exa", "mple.com's passw", "ord: typed"),            # not at the cursor
+])
+def test_screen_match_is_as_strict_as_the_stream(rows):
+    screen = FakeScreen(16)
+    fill, sent = screen_fill(screen)
+    screen.show(*rows)
+    assert not fill.feed("x")
+    assert sent == []
+
+
 def test_stops_after_user_input_or_timeout():
     fill, sent, _, now = make_fill()
     fill.user_typed()
@@ -392,17 +437,21 @@ def test_main_window_ssh_flow(qapp, tmp_path, monkeypatch):
     w.resize(1000, 600)
     w.show()
     pump(qapp, 0.2)
-    w.connect_ssh(s)
-    term = w.terminals.current_terminal()
-    info = w.terminals.current_info()
-    assert info.ssh_session is s and info.autofill is not None
-    pump(qapp, 20, until=lambda: "got:pw1" in "".join(
-        "".join(c.data for c in line.values()) for line in term.screen.buffer.values()))
-    screen = "\n".join("".join(term.screen.buffer[y][x].data for x in range(term.screen.columns))
-                       for y in range(term.screen.lines))
-    assert "got:pw1" in screen and screen.count("pw1") == 1     # printed only by fake ssh
-    assert info.autofill.done
-    w.terminals.close_all()
+    try:
+        w.connect_ssh(s)
+        term = w.terminals.current_terminal()
+        info = w.terminals.current_info()
+        assert info.ssh_session is s and info.autofill is not None
+        pump(qapp, 20, until=lambda: "got:pw1" in "".join(
+            "".join(c.data for c in line.values()) for line in term.screen.buffer.values()))
+        screen = "\n".join("".join(term.screen.buffer[y][x].data
+                                   for x in range(term.screen.columns))
+                           for y in range(term.screen.lines))
+        assert "got:pw1" in screen and screen.count("pw1") == 1     # printed only by fake ssh
+        assert info.autofill.done
+    finally:
+        # A live terminal left behind makes closing the window ask before quitting.
+        w.terminals.close_all()
     # Delete removes the saved password too.
     from PySide6.QtWidgets import QMessageBox
 

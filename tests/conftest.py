@@ -70,6 +70,11 @@ def qapp():
     for widget in QApplication.topLevelWidgets():
         if not shiboken6.isValid(widget) or widget.parent() is not None:
             continue
+        # End terminals a failed test left running, or closing the window asks
+        # whether to quit and waits for an answer.
+        terminals = getattr(widget, "terminals", None)
+        if terminals is not None and hasattr(terminals, "close_all"):
+            terminals.close_all()
         widget.close()
         widget.deleteLater()
         app.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)

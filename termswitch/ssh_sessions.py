@@ -632,23 +632,37 @@ class PasswordAutofill:
 
     WINDOW_SECONDS = 60
 
-    def __init__(self, session: SshSession, fetch, write, clock=None):
+    def __init__(self, session: SshSession, fetch, write, clock=None, screen=None):
         import time
         self._clock = clock or time.monotonic
         self._start = self._clock()
         self._fetch = fetch          # () -> str | None, reads the password store
         self._write = write          # (str) -> None, writes to the pty
+        # () -> (text, columns): the screen up to the cursor (TerminalWidget.
+        # text_before_cursor). Windows ConPTY redraws output instead of passing it
+        # through, wrapping long lines and dropping trailing spaces, so the prompt is
+        # looked for on the screen as well as in the raw output.
+        self._screen = screen
         self.done = False
         self._tail = ""
         user = re.escape(session.user) if session.user else r"[^@\s]+"
         host = re.escape(session.host)
         # OpenSSH: "user@host's password: " and keyboard-interactive "Password: " /
         # "(user@host) Password: ".
-        self._prompt = re.compile(
-            rf"(?:^|\n|\r)(?:{user}@{host}'s password: |\({user}@{host}\) Password: )$")
+        prompt = rf"(?:{user}@{host}'s password:|\({user}@{host}\) Password:)"
+        self._prompt = re.compile(rf"(?:^|\n|\r){prompt} $")
+        self._screen_prompt = re.compile(rf"{prompt} *$")
 
     def user_typed(self) -> None:
         self.done = True
+
+    def _prompt_on_screen(self) -> bool:
+        if self._screen is None:
+            return False
+        text, cols = self._screen()
+        m = self._screen_prompt.search(text)
+        # The prompt must start at the beginning of a row, as ssh prints it.
+        return bool(m and cols and m.start() % cols == 0)
 
     def feed(self, text: str) -> bool:
         """Watch terminal output. Returns True when the password was sent."""
@@ -658,7 +672,7 @@ class PasswordAutofill:
             self.done = True
             return False
         self._tail = (self._tail + text)[-512:]
-        if not self._prompt.search(self._tail):
+        if not (self._prompt.search(self._tail) or self._prompt_on_screen()):
             return False
         self.done = True
         password = self._fetch()

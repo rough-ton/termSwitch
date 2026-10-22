@@ -178,9 +178,10 @@ class TerminalWidget(QAbstractScrollArea):
         if chunks:
             before = len(self.screen.scrollback)
             text = "".join(chunks)
+            self.stream.feed(text)
+            # After the screen is updated, so observers can read it.
             for observe in list(self.output_observers):
                 observe(text)
-            self.stream.feed(text)
             if self._scroll:
                 # Keep the view still while new output arrives.
                 self._scroll = min(self._scroll + len(self.screen.scrollback) - before,
@@ -214,6 +215,19 @@ class TerminalWidget(QAbstractScrollArea):
                 observe()
             self.pty.write(text)
             self._scroll_to_bottom()
+
+    def text_before_cursor(self, max_rows: int = 4) -> tuple[str, int]:
+        """The screen text from up to ``max_rows`` rows above the cursor through the
+        cursor, rows joined without separators, plus the screen width. A line that
+        wrapped reads as one piece; each row starts at a multiple of the width."""
+        cols = self.screen.columns
+        y, x = self.screen.cursor.y, min(self.screen.cursor.x, cols)
+        rows = []
+        for r in range(max(0, y - max_rows + 1), y + 1):
+            line = self.screen.buffer[r]
+            width = cols if r < y else x
+            rows.append("".join((line[c].data or " ") for c in range(width)))
+        return "".join(rows), cols
 
     def write_secret(self, text: str) -> None:
         """Send text to the program without recording or echoing it on our side (used
