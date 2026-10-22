@@ -18,9 +18,27 @@ def _isolated_settings(tmp_path_factory):
 
 @pytest.fixture(scope="session")
 def qapp():
+    from PySide6.QtCore import QThreadPool
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])
     yield app
+    # Tear Qt down in order. Widgets that outlive the QApplication crash the
+    # interpreter at exit (seen as a segfault on Linux and exit code 1 on Windows).
+    QThreadPool.globalInstance().clear()
+    QThreadPool.globalInstance().waitForDone(30000)
+    icon_filter = getattr(app, "_termswitch_icon_filter", None)
+    if icon_filter is not None:
+        app.removeEventFilter(icon_filter)
+    import shiboken6
+    from PySide6.QtCore import QEvent
+    # Delete parentless windows one at a time; their child windows (dialogs,
+    # menus) go with them. Deleting everything in one batch crashed.
+    for widget in QApplication.topLevelWidgets():
+        if not shiboken6.isValid(widget) or widget.parent() is not None:
+            continue
+        widget.close()
+        widget.deleteLater()
+        app.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
 
 
 def pump(app, seconds: float, until=None):

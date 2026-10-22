@@ -66,3 +66,51 @@ def test_docs_url_is_https(qapp, data_dir):
     pane.btn_docs.click()
     assert urls == ["https://awscli.amazonaws.com/v2/documentation/api/latest/reference/"
                     "ec2/describe-instances.html"]
+
+
+def _rect_of(pane, text):
+    m = pane.model
+    for i in range(m.rowCount()):
+        if m.data(m.index(i)) == text:
+            return m.index(i), pane.list.visualRect(m.index(i))
+    raise AssertionError(text)
+
+
+def test_double_click_inserts_once(qapp, data_dir):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    pane = make_pane(qapp, data_dir)
+    pane.resize(400, 700)
+    pane.show()
+    pump(qapp, 0.2)
+    got = []
+    pane.insert_requested.connect(lambda text, run, _cmd: got.append((text, run)))
+    pane.name.setText("caller")
+    pane._refilter()
+    _idx, rect = _rect_of(pane, "sts get-caller-identity")
+    # A real double-click: press and release, then the double-click event.
+    vp = pane.list.viewport()
+    QTest.mouseClick(vp, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                     rect.center())
+    QTest.mouseDClick(vp, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                      rect.center())
+    pump(qapp, 0.1)
+    assert got == [("aws sts get-caller-identity ", False)]
+
+
+def test_enter_inserts_once(qapp, data_dir):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    pane = make_pane(qapp, data_dir)
+    pane.show()
+    pump(qapp, 0.2)
+    got = []
+    pane.insert_requested.connect(lambda text, run, _cmd: got.append(text))
+    pane.name.setText("caller")
+    pane._refilter()
+    pane._select_first()
+    pane.list.setFocus()
+    pump(qapp, 0.1)
+    QTest.keyClick(pane.list, Qt.Key.Key_Return)
+    pump(qapp, 0.1)
+    assert got == ["aws sts get-caller-identity "]

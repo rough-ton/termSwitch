@@ -57,8 +57,7 @@ MIN_AWS_CLI = "2.9.0"
 HTTP_TIMEOUT = 5
 MAX_RESPONSE = 2 * 1024 * 1024
 USER_AGENT = f"termSwitch/{__version__} (dependency check)"
-REPO = "rough-ton/termSwitch"
-RELEASES_URL = f"https://github.com/{REPO}/releases/latest"
+from .links import LATEST_RELEASE_API, LATEST_RELEASE_URL as RELEASES_URL  # noqa: E402
 FROZEN = bool(getattr(sys, "frozen", False))  # running from the packaged app
 
 # Module that carries each distribution's version, for packaged builds where
@@ -120,7 +119,7 @@ def latest_pypi(dist: str) -> str | None:
 
 def latest_termswitch() -> str | None:
     """Latest published release. A private repo or no releases returns None."""
-    data = json.loads(_fetch(f"https://api.github.com/repos/{REPO}/releases/latest"))
+    data = json.loads(_fetch(LATEST_RELEASE_API))
     tag = data.get("tag_name") or ""
     return tag.lstrip("v") or None
 

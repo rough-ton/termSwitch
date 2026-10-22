@@ -44,7 +44,16 @@ BACKUPS_TO_KEEP = 5
 
 SECRET_KEYS = {"aws_secret_access_key", "aws_session_token", "aws_security_token"}
 SECRET_PLACEHOLDER = "<set>"
+# Keys termSwitch never writes. Static keys belong in ~/.aws/credentials and are
+# managed with `aws configure`.
+PROTECTED_KEYS = SECRET_KEYS | {"aws_access_key_id"}
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+_KEY_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]{0,63}$")
+_SESSION_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,63}$")
+_REGION = re.compile(r"^[a-z]{2}(-[a-z]+)+-\d{1,2}$")
+_ACCOUNT_ID = re.compile(r"^\d{12}$")
+_ROLE_ARN = re.compile(r"^arn:aws[a-z-]*:iam::\d{12}:role/[\w+=,.@/-]{1,512}$")
+_ROLE_NAME = re.compile(r"^[\w+=,.@-]{1,64}$")
 
 
 class ConfigError(Exception):
@@ -130,6 +139,70 @@ def unsafe_name_reason(name: str) -> str | None:
     if len(name) > 128:
         return "Profile name is longer than 128 characters."
     return None
+
+
+def profile_name_problem(name: str) -> str | None:
+    """Why a name can't be used for a new or renamed profile, or None."""
+    reason = unsafe_name_reason(name)
+    if reason:
+        return reason
+    if name != name.strip():
+        return "Profile name can't start or end with a space."
+    if any(c in name for c in "[]"):
+        return "Profile name can't contain [ or ]."
+    if name.lower().startswith(("sso-session ", "services ")) or name in (META_SECTION,):
+        return "That name is reserved."
+    return None
+
+
+def sso_session_name_problem(name: str) -> str | None:
+    if not _SESSION_NAME.match(name or ""):
+        return ("SSO session names use letters, digits, '.', '_' and '-', "
+                "starting with a letter or digit.")
+    return None
+
+
+def key_problem(key: str) -> str | None:
+    if not _KEY_NAME.match(key or ""):
+        return f"'{key}' is not a valid setting name."
+    if key.lower() in PROTECTED_KEYS:
+        return (f"termSwitch doesn't store '{key}'. Keys belong in ~/.aws/credentials; "
+                "use `aws configure` or, better, AWS SSO.")
+    return None
+
+
+def value_problem(key: str, value: str) -> str | None:
+    """Check one setting's value. Only well-known settings get format checks."""
+    if _CONTROL_CHARS.search(value):
+        return f"{key}: the value can't contain line breaks or control characters."
+    if value != value.strip():
+        return f"{key}: remove the leading or trailing spaces."
+    if not value:
+        return f"{key}: the value is empty."
+    checks = {
+        "region": (_REGION, "a region such as us-west-2"),
+        "sso_region": (_REGION, "a region such as us-east-1"),
+        "sso_account_id": (_ACCOUNT_ID, "a 12-digit account ID"),
+        "role_arn": (_ROLE_ARN, "an IAM role ARN such as arn:aws:iam::123456789012:role/Name"),
+        "sso_role_name": (_ROLE_NAME, "an IAM role name"),
+    }
+    if key in checks and not checks[key][0].match(value):
+        return f"{key}: expected {checks[key][1]}."
+    if key == "sso_start_url" and not safe_https_url(value):
+        return "sso_start_url: expected an https:// URL."
+    if key == "duration_seconds" and not (value.isdigit() and 900 <= int(value) <= 43200):
+        return "duration_seconds: expected a number from 900 to 43200."
+    if key == "output" and value not in ("json", "text", "table", "yaml", "yaml-stream"):
+        return "output: expected json, text, table, yaml or yaml-stream."
+    return None
+
+
+def check_settings(props: dict[str, str]) -> None:
+    """Raise ConfigError for the first invalid key or value."""
+    for key, value in props.items():
+        problem = key_problem(key) or (value_problem(key, value) if value is not None else None)
+        if problem:
+            raise ConfigError(problem)
 
 
 def safe_https_url(url: str | None) -> str | None:
@@ -267,6 +340,8 @@ class ProfileStore:
         self.extra_groups: set[str] = set()
         self.loaded_text: str = ""
         self._backup_done = False
+        self.undo_label: str | None = None     # what the last change did, if undoable
+        self._undo_expected: str | None = None  # file text right after that change
 
     # ---- reading ---------------------------------------------------------
 
@@ -422,7 +497,288 @@ class ProfileStore:
 
         self._edit(edit)
 
+
+    # ---- profiles ------------------------------------------------------------
+
+    def config_section_name(self, name: str) -> str:
+        return "default" if name == "default" else f"profile {name}"
+
+    def references_to(self, name: str) -> list[str]:
+        """Profiles that use ``name`` as their source_profile."""
+        return sorted((p.name for p in self.profiles.values()
+                       if p.props.get("source_profile") == name), key=natural_key)
+
+    def sso_session_users(self, session: str) -> list[str]:
+        return sorted((p.name for p in self.profiles.values() if p.sso_session == session),
+                      key=natural_key)
+
+    def create_profile(self, name: str, props: dict[str, str],
+                       group: str | None = None) -> None:
+        problem = profile_name_problem(name)
+        if problem:
+            raise ConfigError(problem)
+        if name in self.profiles:
+            raise ConfigError(f"A profile named '{name}' already exists.")
+        props = {k: v for k, v in props.items() if v not in (None, "")}
+        check_settings(props)
+        section = self.config_section_name(name)
+
+        def edit(u: ConfigUpdater) -> None:
+            if u.has_section(section) or (name == "default" and u.has_section("profile default")):
+                raise ConfigError(f"A profile named '{name}' already exists.")
+            sec = _add_section(u, section)
+            for key, value in props.items():
+                _set_option(sec, key, value)
+            if normalize_group(group):
+                _set_option(sec, GROUP_KEY, normalize_group(group))
+
+        self._edit(edit, f"Create profile {name}")
+
+    def update_profile(self, name: str, changes: dict[str, str | None]) -> None:
+        """Apply only the given changes; None removes a key. Keys that aren't in
+        ``changes`` are left exactly as they are, including secrets and nested
+        settings termSwitch doesn't show."""
+        if not changes:
+            return
+        changes = dict(changes)
+        if GROUP_KEY in changes:
+            changes[GROUP_KEY] = normalize_group(changes[GROUP_KEY])
+        check_settings(changes)
+
+        def edit(u: ConfigUpdater) -> None:
+            sec = self._existing_config_section(u, name)
+            for key, value in changes.items():
+                _set_option(sec, key, value)
+
+        self._edit(edit, f"Edit profile {name}")
+
+    def rename_profile(self, old: str, new: str, update_references: bool = True) -> list[str]:
+        """Rename a profile's config section. Returns the profiles whose
+        source_profile was updated."""
+        problem = profile_name_problem(new)
+        if problem:
+            raise ConfigError(problem)
+        if new == old:
+            return []
+        if new in self.profiles:
+            raise ConfigError(f"A profile named '{new}' already exists.")
+        prof = self.profiles.get(old)
+        if prof is None:
+            raise ConfigError(f"Profile '{old}' no longer exists. Reload and try again.")
+        if "credentials" in prof.sources:
+            raise ConfigError(f"'{old}' also has keys in {self.credentials_file.name}, which "
+                              "termSwitch doesn't change. Rename it there and in the config "
+                              "by hand, or with `aws configure`.")
+        refs = self.references_to(old) if update_references else []
+
+        def edit(u: ConfigUpdater) -> None:
+            sec = self._existing_config_section(u, old)
+            sec.name = self.config_section_name(new)
+            for ref_name in refs:
+                _set_option(self._existing_config_section(u, ref_name), "source_profile", new)
+
+        self._edit(edit, f"Rename profile {old} to {new}")
+        return refs
+
+    def duplicate_profile(self, source: str, new: str) -> None:
+        """Copy a profile's settings to a new profile. Static keys are not copied."""
+        prof = self.profiles.get(source)
+        if prof is None:
+            raise ConfigError(f"Profile '{source}' no longer exists. Reload and try again.")
+        problem = profile_name_problem(new)
+        if problem:
+            raise ConfigError(problem)
+        if new in self.profiles:
+            raise ConfigError(f"A profile named '{new}' already exists.")
+        section = self.config_section_name(new)
+
+        def edit(u: ConfigUpdater) -> None:
+            src = self._existing_config_section(u, source)
+            dst = _add_section(u, section)
+            for opt in src.iter_options():
+                if opt.key.lower() in PROTECTED_KEYS:
+                    continue
+                _copy_option(opt, dst)
+
+        self._edit(edit, f"Duplicate profile {source} as {new}")
+
+    def delete_profiles(self, names: Iterable[str]) -> list[str]:
+        """Remove profiles' config sections. Returns the names that still exist
+        afterwards because they also have keys in the credentials file."""
+        names = list(names)
+        if not names:
+            return []
+
+        def edit(u: ConfigUpdater) -> None:
+            for name in names:
+                candidates = (["default", "profile default"] if name == "default"
+                              else [f"profile {name}"])
+                found = [c for c in candidates if u.has_section(c)]
+                if not found and "credentials" not in self.profiles.get(name, Profile(name)).sources:
+                    raise ConfigError(f"Profile '{name}' no longer exists. Reload and try again.")
+                for c in found:
+                    u.remove_section(c)
+
+        label = f"Delete profile {names[0]}" if len(names) == 1 else f"Delete {len(names)} profiles"
+        self._edit(edit, label)
+        return [n for n in names if n in self.profiles]
+
+    # ---- SSO sessions ----------------------------------------------------
+
+    def create_sso_session(self, name: str, props: dict[str, str]) -> None:
+        problem = sso_session_name_problem(name)
+        if problem:
+            raise ConfigError(problem)
+        if name in self.sso_sessions:
+            raise ConfigError(f"An SSO session named '{name}' already exists.")
+        props = {k: v for k, v in props.items() if v not in (None, "")}
+        for required in ("sso_start_url", "sso_region"):
+            if required not in props:
+                raise ConfigError(f"{required} is required.")
+        check_settings(props)
+
+        def edit(u: ConfigUpdater) -> None:
+            sec = _add_section(u, f"sso-session {name}")
+            for key, value in props.items():
+                _set_option(sec, key, value)
+
+        self._edit(edit, f"Create SSO session {name}")
+
+    def update_sso_session(self, name: str, changes: dict[str, str | None]) -> None:
+        for required in ("sso_start_url", "sso_region"):
+            if required in changes and not changes[required]:
+                raise ConfigError(f"{required} is required.")
+        check_settings({k: v for k, v in changes.items()})
+
+        def edit(u: ConfigUpdater) -> None:
+            section = f"sso-session {name}"
+            if not u.has_section(section):
+                raise ConfigError(f"SSO session '{name}' no longer exists. Reload and try again.")
+            for key, value in changes.items():
+                _set_option(u[section], key, value)
+
+        self._edit(edit, f"Edit SSO session {name}")
+
+    def delete_sso_session(self, name: str) -> None:
+        def edit(u: ConfigUpdater) -> None:
+            section = f"sso-session {name}"
+            if not u.has_section(section):
+                raise ConfigError(f"SSO session '{name}' no longer exists. Reload and try again.")
+            u.remove_section(section)
+
+        self._edit(edit, f"Delete SSO session {name}")
+
+    # ---- the whole file -----------------------------------------------------
+
+    def read_raw(self) -> str:
+        return _read_text(self.config_file)
+
+    def contains_secrets(self, text: str | None = None) -> bool:
+        """True if the config file itself holds static keys (it's allowed, but
+        termSwitch won't load such a file into its editor)."""
+        text = self.read_raw() if text is None else text
+        return bool(re.search(r"^\s*(aws_secret_access_key|aws_session_token|"
+                              r"aws_security_token)\s*[=:]", text, re.I | re.M))
+
+    @staticmethod
+    def parse_problem(text: str) -> tuple[int | None, str] | None:
+        """(line, message) for the first parse error in config text, or None."""
+        try:
+            _parser().read_string(text)
+        except configparser.Error as exc:
+            line = getattr(exc, "lineno", None)
+            if line is None:
+                m = re.search(r"line:?\s*(\d+)", str(exc))
+                line = int(m.group(1)) if m else None
+            return line, str(exc).splitlines()[0]
+        return None
+
+    def save_raw(self, text: str) -> None:
+        if not text.endswith("\n"):
+            text += "\n"
+        problem = self.parse_problem(text)
+        if problem:
+            line, msg = problem
+            where = f" (line {line})" if line else ""
+            raise ConfigError(f"The config doesn't parse{where}: {msg}")
+        self._replace_text(text, "Edit config file")
+
+    def backups(self) -> list[Path]:
+        """termSwitch's backups of this config, newest first."""
+        found = self.config_file.parent.glob(f"{self.config_file.name}.termswitch-*.bak")
+        return sorted((p for p in found if p.is_file()),
+                      key=lambda p: p.stat().st_mtime, reverse=True)
+
+    def restore_backup(self, backup: Path) -> None:
+        backup = Path(backup)
+        if backup.resolve() not in {b.resolve() for b in self.backups()}:
+            raise ConfigError("That file is not one of termSwitch's backups of this config.")
+        text = backup.read_text(encoding="utf-8")
+        problem = self.parse_problem(text)
+        if problem:
+            raise ConfigError(f"The backup doesn't parse: {problem[1]}")
+        self._replace_text(text, f"Restore {backup.name}", force_backup=True)
+
+    def reset_config(self) -> Path | None:
+        """Move the config aside as a backup, leaving no config file.
+
+        Returns the backup path, or None if there was no file. A symlinked config is
+        refused, because moving it would break the link to wherever it is managed."""
+        if self.config_file.is_symlink():
+            raise ConfigError(f"{self.config_file} is a symlink. Reset it where it is managed.")
+        if not self.config_file.exists():
+            return None
+        self._write_target()
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        dest = self.config_file.with_name(f"{self.config_file.name}.termswitch-reset-{stamp}.bak")
+        os.replace(self.config_file, dest)
+        self._save_undo(dest.read_text(encoding="utf-8"), "Reset config")
+        self._undo_expected = ""
+        self.load()
+        return dest
+
+    # ---- undo ----------------------------------------------------------------
+
+    @property
+    def undo_file(self) -> Path:
+        return self.config_file.with_name(f".{self.config_file.name}.termswitch-undo")
+
+    def can_undo(self) -> bool:
+        return self.undo_label is not None and self.undo_file.is_file()
+
+    def undo(self) -> str:
+        """Put back the config as it was before the last change. Undoing again
+        redoes it. Returns what was undone."""
+        if not self.can_undo():
+            raise ConfigError("There is nothing to undo.")
+        if _read_text(self.config_file) != self._undo_expected:
+            raise ConfigError("The config changed outside termSwitch after that change, so "
+                              "it can't be undone safely. Use File > Backups instead.")
+        label = self.undo_label
+        text = self.undo_file.read_text(encoding="utf-8")
+        self._replace_text(text, f"Undo: {label}")
+        self.undo_label = f"Undo: {label}" if not label.startswith("Undo: ") else label[6:]
+        return label
+
+    def discard_undo(self) -> None:
+        self.undo_label = None
+        self._undo_expected = None
+        try:
+            self.undo_file.unlink()
+        except OSError:
+            pass
+
     # ---- internals -------------------------------------------------------
+
+    def _existing_config_section(self, u: ConfigUpdater, name: str):
+        for candidate in (["default", "profile default"] if name == "default"
+                          else [f"profile {name}"]):
+            if u.has_section(candidate):
+                return u[candidate]
+        if name in self.profiles and "credentials" in self.profiles[name].sources:
+            raise ConfigError(f"'{name}' is only in {self.credentials_file.name}, which "
+                              "termSwitch doesn't change.")
+        raise ConfigError(f"Profile '{name}' no longer exists. Reload and try again.")
 
     def _ensure_profile_section(self, u: ConfigUpdater, name: str):
         for candidate in (["default", "profile default"] if name == "default"
@@ -462,7 +818,7 @@ class ProfileStore:
         sec = u[META_SECTION] if u.has_section(META_SECTION) else _add_section(u, META_SECTION)
         _set_option(sec, META_GROUPS_KEY, ", ".join(keep))
 
-    def _edit(self, fn: Callable[[ConfigUpdater], None]) -> None:
+    def _edit(self, fn: Callable[[ConfigUpdater], None], label: str = "Change config") -> None:
         original = _read_text(self.config_file)
         source = original if not original or original.endswith("\n") else original + "\n"
         updater = ConfigUpdater(strict=False)
@@ -486,8 +842,42 @@ class ProfileStore:
 
         self._write_target()  # fail before making a backup if the target is unsafe
         self._backup(original)
+        self._save_undo(original, label)
         self._atomic_write(new_text)
+        self._undo_expected = new_text
         self.load()
+
+    def _replace_text(self, text: str, label: str, force_backup: bool = False) -> None:
+        """Replace the whole file (raw edit, restore, undo) with the same safety
+        steps as any other write."""
+        original = _read_text(self.config_file)
+        if text == original:
+            self.load()
+            return
+        self._write_target()
+        self._backup(original, force=force_backup)
+        self._save_undo(original, label)
+        self._atomic_write(text)
+        self._undo_expected = text
+        self.load()
+
+    def _save_undo(self, original: str, label: str) -> None:
+        """Keep the text from before this change in a private file (mode 0600) next
+        to the config, so the change can be undone. Only the last change is kept."""
+        path = self.undo_file
+        _ensure_private_dir(path.parent)
+        fd, tmp = tempfile.mkstemp(prefix=".undo-", dir=path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(original)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        self.undo_label = label
 
     def _write_target(self) -> Path:
         """The real file to replace. Follows a symlink (dotfile repos) instead of
@@ -505,15 +895,21 @@ class ProfileStore:
                 raise ConfigError(f"{target} is owned by another user. Refusing to write.")
         return target
 
-    def _backup(self, original: str) -> None:
-        if self._backup_done or not original:
+    def _backup(self, original: str, force: bool = False) -> None:
+        if (self._backup_done and not force) or not original:
             return
         stamp = time.strftime("%Y%m%d-%H%M%S")
         backup = self.config_file.with_name(f"{self.config_file.name}.termswitch-{stamp}.bak")
+        n = 1
+        while backup.exists() and backup.read_text(encoding="utf-8") != original:
+            n += 1
+            backup = self.config_file.with_name(
+                f"{self.config_file.name}.termswitch-{stamp}-{n}.bak")
         fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(original)
-        old = sorted(self.config_file.parent.glob(f"{self.config_file.name}.termswitch-*.bak"))
+        # Rotate only the regular backups; reset backups are kept until removed by hand.
+        old = sorted(self.config_file.parent.glob(f"{self.config_file.name}.termswitch-[0-9]*.bak"))
         for stale in old[:-BACKUPS_TO_KEEP]:
             try:
                 stale.unlink()
@@ -523,7 +919,7 @@ class ProfileStore:
 
     def _atomic_write(self, text: str) -> None:
         target = self._write_target()
-        target.parent.mkdir(parents=True, exist_ok=True)
+        _ensure_private_dir(target.parent)
         # mkstemp creates the file 0600 in the same directory, so os.replace is atomic.
         fd, tmp = tempfile.mkstemp(prefix=".config-", dir=target.parent)
         try:
@@ -587,6 +983,29 @@ def _set_option(sec, key: str, value: str | None) -> None:
         blocks[0].add_before.option(key, value)
     else:
         sec[key] = value
+
+
+def _ensure_private_dir(path: Path) -> None:
+    """Create a missing config folder (such as ~/.aws) readable only by the user."""
+    if not path.exists():
+        path.mkdir(mode=0o700, parents=True)
+        try:
+            os.chmod(path, 0o700)   # mkdir's mode is reduced by the umask
+        except OSError:
+            pass
+
+
+def _copy_option(opt, dst) -> None:
+    """Copy one option, including multi-line (nested) values, to another section."""
+    if opt.value is not None and "\n" in str(opt.value):
+        values = str(opt.value).split("\n")
+        dst.set(opt.key, None)
+        if values[0] == "":
+            dst[opt.key].set_values(values[1:])
+        else:
+            dst[opt.key].set_values(values, prepend_newline=False)
+    else:
+        _set_option(dst, opt.key, opt.value)
 
 
 def _add_section(u: ConfigUpdater, name: str):

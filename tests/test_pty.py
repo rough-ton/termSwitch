@@ -46,9 +46,23 @@ def test_write_reaches_child():
 
 @pytest.mark.skipif(IS_WINDOWS, reason="stty is POSIX only")
 def test_size_and_resize():
-    out, _, _ = run(["/bin/sh", "-c", "stty size; sleep 1; stty size"], cols=90, rows=25,
-                    resize=(120, 40))
-    assert "25 90" in out and "40 120" in out
+    """The child prints its size, waits for a line, then prints it again. Resizing
+    only after the first size arrives keeps the test independent of timing (a fixed
+    delay sometimes resized before the shell had started)."""
+    import os
+    import time
+    out, done, codes = [], threading.Event(), []
+    p = PtyProcess(["/bin/sh", "-c", "stty size; read x; stty size"], dict(os.environ),
+                   None, 90, 25, on_data=out.append,
+                   on_exit=lambda c: (codes.append(c), done.set()))
+    deadline = time.monotonic() + 10
+    while "25 90" not in "".join(out) and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert "25 90" in "".join(out), "".join(out)
+    p.resize(120, 40)
+    p.write("\r")
+    assert done.wait(10), "process did not exit"
+    assert "40 120" in "".join(out).split("25 90", 1)[1]
 
 
 def test_relative_shell_refused():

@@ -23,6 +23,8 @@ already set to that profile.
 
 - **Grouped profiles.** Drag profiles into nested groups. Groups are saved in
   `~/.aws/config`, so they follow the file to any machine.
+- **Profile management.** Create, edit, rename, duplicate and delete profiles, with
+  undo. New users get a guided AWS SSO setup.
 - **Embedded terminals.** One tab per profile, with PowerShell on Windows and your login
   shell on macOS. Full-screen programs, scrollback and colored tabs work as expected.
 - **Commands pane.** Browse every AWS CLI command your installed CLI supports, fill in a

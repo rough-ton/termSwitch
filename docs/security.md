@@ -63,9 +63,26 @@ does to protect them, and what it can't protect against. To report a vulnerabili
 - A symlinked config (dotfiles repo) is written through to its target, so the link
   survives.
 - The first write of each session saves a mode-0600
-  `config.termswitch-YYYYMMDD-HHMMSS.bak`. The newest 5 are kept.
+  `config.termswitch-YYYYMMDD-HHMMSS.bak`. The newest 5 are kept. Restoring a backup
+  always backs up the current file first, and a reset keeps the old file as
+  `config.termswitch-reset-YYYYMMDD-HHMMSS.bak`, which is never rotated away.
 - Outside changes, such as `aws configure sso` or an editor, are picked up before each
   write, so they are not overwritten.
+- To support Undo, the text from before the last change is kept in a mode-0600
+  `.config.termswitch-undo` file next to the config. It's removed when termSwitch
+  quits. Undo is refused if the config changed outside termSwitch since that change.
+- When termSwitch creates `~/.aws` for a new user, the folder is created mode 0700 and
+  the config mode 0600.
+- Profile edits write only the settings that changed. Names, keys and values are
+  checked first, and values can't contain line breaks or control characters, so an
+  edit can't inject new sections or settings.
+- termSwitch never writes `aws_access_key_id`, `aws_secret_access_key` or session
+  tokens, in either file. Duplicating a profile skips them, and the in-app config
+  editor refuses to open or save a config that contains them.
+- **Sign in and pick accounts** runs `aws configure sso` itself. The AWS CLI handles
+  the sign-in and the SSO token; termSwitch never reads the token cache.
+- Choosing another config file sets `AWS_CONFIG_FILE` for termSwitch's own status
+  checks and new tabs. An `AWS_CONFIG_FILE` already set in your environment wins.
 
 ## Supply chain
 

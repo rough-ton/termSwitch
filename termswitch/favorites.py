@@ -16,6 +16,43 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QSettings, Signal
 
 SETTINGS_KEY = "favorite_commands"
+DEFAULTS_ADDED_KEY = "favorite_commands_defaults_added"
+
+# Starter favorites, from "Top 20 AWS CLI Commands Every DevOps Engineer Should Know"
+# (Cloud Native Chronicles): every distinct command in the article, in its order.
+# Bare `aws configure` is left out because favorites are "service command" pairs.
+DEFAULT_FAVORITES = (
+    "sts get-caller-identity",
+    "ec2 describe-instances",
+    "ec2 start-instances",
+    "ec2 stop-instances",
+    "ec2 create-snapshot",
+    "s3 ls",
+    "s3 cp",
+    "s3 sync",
+    "iam list-users",
+    "iam list-roles",
+    "iam list-policies",
+    "iam list-groups",
+    "iam attach-user-policy",
+    "iam attach-group-policy",
+    "iam attach-role-policy",
+    "lambda list-functions",
+    "lambda invoke",
+    "cloudformation validate-template",
+    "cloudformation deploy",
+    "ecr get-login-password",
+    "ecs list-clusters",
+    "eks list-clusters",
+    "eks describe-cluster",
+    "ecs describe-clusters",
+    "logs describe-log-groups",
+    "logs filter-log-events",
+    "autoscaling describe-auto-scaling-groups",
+    "elbv2 describe-load-balancers",
+    "rds describe-db-instances",
+    "cloudwatch get-metric-data",
+)
 FILE_FORMAT = "termswitch-favorites"
 FILE_VERSION = 1
 MAX_IMPORT_BYTES = 1_000_000
@@ -38,14 +75,21 @@ class Favorites(QObject):
 
     changed = Signal()
 
-    def __init__(self, settings: QSettings | None = None, parent=None):
+    def __init__(self, settings: QSettings | None = None, parent=None,
+                 defaults: tuple[str, ...] = ()):
         super().__init__(parent)
         self.settings = settings if settings is not None else QSettings()
+        self.defaults = tuple(d for d in defaults if is_valid_key(d))
         raw = self.settings.value(SETTINGS_KEY, [], type=list) or []
         self._items: list[str] = []
         for value in raw:
             if is_valid_key(value) and value not in self._items:
                 self._items.append(value)
+        # Starter favorites are added once. After that the list is the user's own:
+        # removing them, or all favorites, never brings them back on restart.
+        if self.defaults and not self.settings.value(DEFAULTS_ADDED_KEY, False, type=bool):
+            self.settings.setValue(DEFAULTS_ADDED_KEY, True)
+            self.add_defaults()
 
     # ---- queries ---------------------------------------------------------
 
@@ -81,6 +125,22 @@ class Favorites(QObject):
             self.remove(key)
             return False
         return self.add(key)
+
+    def add_defaults(self) -> int:
+        """Add any starter favorites that are missing. Returns how many were added."""
+        added = 0
+        for key in self.defaults:
+            if key not in self._items and len(self._items) < MAX_FAVORITES:
+                self._items.append(key)
+                added += 1
+        if added:
+            self._save()
+        else:
+            self.settings.sync()
+        return added
+
+    def missing_defaults(self) -> int:
+        return sum(1 for key in self.defaults if key not in self._items)
 
     def _save(self):
         self.settings.setValue(SETTINGS_KEY, list(self._items))

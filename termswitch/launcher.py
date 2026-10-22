@@ -499,6 +499,29 @@ def shell_wrapper_dir() -> str:
     return d
 
 
+def terminal_env(platform: str | None = None) -> dict[str, str]:
+    """Environment for anything running in a termSwitch tab: credentials scrubbed,
+    plus the terminal type and a locale on macOS and Linux."""
+    env = build_env(platform)
+    env["TERM_PROGRAM"] = "termSwitch"
+    if platform_key(platform) != "win32":
+        env["TERM"] = "xterm-256color"
+        env["COLORTERM"] = "truecolor"
+        if not env.get("LANG") and not env.get("LC_ALL"):
+            env["LANG"] = "en_US.UTF-8"   # apps started from Finder get no locale
+    return env
+
+
+def aws_setup_command(args: list[str], platform: str | None = None,
+                      aws: str | None = None) -> tuple[list[str], dict[str, str]]:
+    """argv and environment to run one AWS CLI command (such as ``configure sso``)
+    directly in a tab, with no profile selected."""
+    aws = aws or find_aws(platform)
+    if not aws:
+        raise LaunchError("The AWS CLI was not found. Install AWS CLI v2 first.")
+    return [aws, *args], terminal_env(platform)
+
+
 def embedded_command(profile: Profile, opts: LaunchOptions, platform: str | None = None,
                      aws: str | None = None) -> tuple[list[str], dict[str, str]]:
     """argv and environment for a shell running inside a termSwitch tab."""
@@ -506,19 +529,14 @@ def embedded_command(profile: Profile, opts: LaunchOptions, platform: str | None
     if problem:
         raise LaunchError(f"Refusing to open '{profile.name!r}': {problem}")
     key = platform_key(platform)
-    env = build_env(platform)
+    env = terminal_env(platform)
     env["AWS_PROFILE"] = profile.name
-    env["TERM_PROGRAM"] = "termSwitch"
 
     if key == "win32":
         shell = _which("pwsh", platform) or system_powershell()
         script = powershell_script(profile, opts, aws)
         return [shell, "-NoLogo", "-NoExit", "-EncodedCommand", encode_powershell(script)], env
 
-    env["TERM"] = "xterm-256color"
-    env["COLORTERM"] = "truecolor"
-    if not env.get("LANG") and not env.get("LC_ALL"):
-        env["LANG"] = "en_US.UTF-8"   # apps started from Finder get no locale
     shell = user_shell(platform)
     wrappers = shell_wrapper_dir()
     env["TERMSWITCH_AWS_PROFILE"] = profile.name

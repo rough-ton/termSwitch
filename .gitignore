@@ -8,3 +8,4 @@ dmg/
 *.egg-info/
 .DS_Store
 termswitch/_version.py
+pytest-output.txt

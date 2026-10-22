@@ -3,7 +3,10 @@
 [Back to README](../README.md)
 
 - [The main window](#the-main-window)
+- [Getting started without a config](#getting-started-without-a-config)
 - [Profiles and groups](#profiles-and-groups)
+- [Managing profiles](#managing-profiles)
+- [Managing the config file](#managing-the-config-file)
 - [Terminal tabs](#terminal-tabs)
 - [Commands pane](#commands-pane)
 - [Favorite commands](#favorite-commands)
@@ -11,6 +14,7 @@
 - [Run safety](#run-safety)
 - [Collapsing the Commands pane](#collapsing-the-commands-pane)
 - [Credential status and SSO](#credential-status-and-sso)
+- [About termSwitch](#about-termswitch)
 
 ## The main window
 
@@ -18,6 +22,27 @@
 
 The window has three parts: the profile tree on the left, terminal tabs in the middle,
 and the Commands pane on the right.
+
+## Getting started without a config
+
+When there's no `~/.aws/config` yet, or it has no profiles, the profile tree is replaced
+by a welcome panel with three choices:
+
+1. **Set up AWS SSO** (recommended if your organization uses IAM Identity Center):
+   1. Create an SSO session: a name, your access portal's start URL, and the SSO region.
+   2. Then pick one of:
+      - **Sign in and pick accounts:** runs `aws configure sso` in a new tab. At its first
+        prompt, enter the session name. The AWS CLI opens your browser to sign in, lists
+        the accounts and roles you can use, and saves a profile. Run it again for each
+        account and role you want. New profiles appear in the tree as soon as they're
+        saved.
+      - **Add a profile by hand:** enter an account ID and role name yourself.
+2. **Add a profile:** opens the profile editor described below.
+3. **Use an existing config file:** points termSwitch at another file. termSwitch sets
+   `AWS_CONFIG_FILE` for its status checks and new terminal tabs, so the AWS CLI uses
+   the same file. **File > Use the default config file** switches back.
+
+If the AWS CLI isn't installed, the panel says so and links to the dependency check.
 
 ## Profiles and groups
 
@@ -34,6 +59,14 @@ and the Commands pane on the right.
 | Status | Check all (Ctrl+Shift+R), or right-click |
 | SSO login | Button or right-click (opens your browser) |
 | Tab color | Right-click a profile > Set tab color |
+| New profile | Toolbar, Ctrl+N in the tree, or right-click a group > New profile here |
+| Edit profile | Edit button, Ctrl+E in the tree, or right-click > Edit |
+| Rename profile | F2, or right-click > Rename |
+| Delete profile | Delete (Cmd+Backspace on macOS), or right-click > Delete |
+| Undo the last change | Profiles > Undo, or Ctrl+Z (Cmd+Z) in the tree |
+
+The tree shortcuts only work while the tree has focus, so Ctrl+N and Ctrl+Z still reach
+the shell in a terminal tab.
 
 ### How groups are stored
 
@@ -62,6 +95,72 @@ Profiles without `x_group` appear in italic automatic groups. By default those a
 grouped by SSO session or credential type; change it under View > Group untagged
 profiles by. Dropping a profile on an automatic group, or on empty space, removes its
 `x_group`.
+
+## Managing profiles
+
+**New profile** opens a form with three profile types:
+
+- **AWS SSO (IAM Identity Center):** an SSO session, an account ID and a role name.
+  **New...** next to the session list creates a session without leaving the form.
+- **Assume a role:** a role ARN and a source profile, plus an optional external ID, MFA
+  device, session name and duration.
+- **Custom:** any settings, entered in the **Other settings** table.
+
+Every type also has region, output format and group. The form checks values before
+saving: profile names can't contain `[`, `]` or control characters, account IDs must
+be 12 digits, role ARNs and regions must be well formed, and names must be unique.
+
+**Edit** shows the same form for an existing profile:
+
+- Only the settings you change are written. Everything else in the profile, including
+  comments, nested settings such as `s3 =` blocks, and keys the form doesn't know
+  about, stays exactly as it was.
+- Static keys (`aws_access_key_id`, `aws_secret_access_key`) are shown masked and
+  read-only. termSwitch never writes them; use `aws configure`, or better, AWS SSO.
+- A `credential_process` setting shows a warning, because it runs a program every
+  time the profile is used.
+
+**Rename** asks whether to update other profiles that use the old name as their
+`source_profile`. Scripts and environment variables that use the old name aren't
+changed.
+
+**Duplicate** copies a profile's settings, except static keys, and opens the copy in
+the editor.
+
+**Delete** works on one or several selected profiles. It warns when other profiles use
+a deleted profile as their `source_profile`, and when a profile also has keys in
+`~/.aws/credentials`, which termSwitch doesn't change (so it stays in the list).
+
+Open terminal tabs for a renamed or deleted profile keep running with the old
+`AWS_PROFILE`. Their tab title says "(renamed)" or "(deleted)", and they can't be
+duplicated.
+
+**Production profiles** (matching the production pattern in Settings) need a second
+confirmation to rename or delete: type the profile name.
+
+**Undo** reverses the last change to the config, including deletes, renames, restores
+and resets. Undoing again redoes it. If the file was changed outside termSwitch since,
+undo is refused; use **File > Backups** instead.
+
+## Managing the config file
+
+The **File** menu has tools for the whole config:
+
+- **SSO sessions:** list, add, edit and delete `[sso-session]` sections. Deleting a
+  session that profiles still use lists them first.
+- **Add profiles from AWS SSO:** runs `aws configure sso` in a tab, as in the setup
+  steps above.
+- **Edit config file:** an editor with highlighting for sections, settings and comments.
+  - It checks the text as you type, and Save stays disabled until the file parses. The
+    line with the problem is underlined.
+  - It warns if the file changed on disk while you were editing.
+  - It won't open, or save, a config that contains access keys or session tokens. Use
+    **Open in external editor** for those.
+- **Backups:** termSwitch's backups of the config, newest first, with a preview.
+  Restoring backs up the current file first.
+- **Reset config:** moves the config aside as a backup and shows the welcome panel. The
+  old file is kept, and can be restored from Backups or with Undo. A symlinked config
+  (for example from a dotfiles repo) is never reset.
 
 ## Terminal tabs
 
@@ -148,6 +247,33 @@ Star the commands you use most so they're one click away.
   - With **All** selected and the Name filter empty, a **Favorites** section appears
     above the A-Z list.
   - Favorites show a star wherever they appear.
+- **Starter favorites:** on first run, termSwitch adds 30 commonly used commands,
+  taken from every command in
+  [Top 20 AWS CLI Commands Every DevOps Engineer Should Know](https://medium.com/cloud-native-chronicles/top-20-aws-cli-commands-every-devops-engineer-should-know-37fd68898a29).
+  They're added once and are yours to remove. If you already have favorites, the
+  starters are added after them. To add back any you removed, right-click in the
+  Favorites view > **Restore default favorites**; your own favorites are kept.
+
+  <details>
+  <summary>The starter favorites</summary>
+
+  | Area | Commands |
+  | --- | --- |
+  | Identity | `sts get-caller-identity` |
+  | EC2 | `ec2 describe-instances`, `ec2 start-instances`, `ec2 stop-instances`, `ec2 create-snapshot` |
+  | S3 | `s3 ls`, `s3 cp`, `s3 sync` |
+  | IAM | `iam list-users`, `iam list-roles`, `iam list-policies`, `iam list-groups`, `iam attach-user-policy`, `iam attach-group-policy`, `iam attach-role-policy` |
+  | Lambda | `lambda list-functions`, `lambda invoke` |
+  | CloudFormation | `cloudformation validate-template`, `cloudformation deploy` |
+  | Containers | `ecr get-login-password`, `ecs list-clusters`, `ecs describe-clusters`, `eks list-clusters`, `eks describe-cluster` |
+  | Logs and metrics | `logs describe-log-groups`, `logs filter-log-events`, `cloudwatch get-metric-data` |
+  | Scaling and load balancing | `autoscaling describe-auto-scaling-groups`, `elbv2 describe-load-balancers` |
+  | RDS | `rds describe-db-instances` |
+
+  The article's `aws configure` isn't included, because favorites are service and
+  command pairs.
+
+  </details>
 - **Storage:** favorites are saved in termSwitch's own settings, never in
   `~/.aws/config`.
 - **After an AWS CLI upgrade:** a favorite the installed CLI no longer has stays in the
@@ -242,3 +368,22 @@ version:
   on that SSO session.
 - **Production safeguards.** Profiles that match a pattern (`prod` by default) show in
   red and get a red tab color. By default, termSwitch asks before opening one.
+
+## About termSwitch
+
+![The About dialog](images/about.png)
+
+**Help > About** (in the termSwitch menu on macOS) shows the version and, for
+downloaded builds, the commit it was built from. Source checkouts show the base version
+followed by "(source)".
+
+- **Links:** the project website, the GitHub repository, the release notes for the
+  version you're running, a pre-filled bug report with your version and OS, and the
+  licenses.
+- **Update status:** downloaded builds check for a newer release in the background,
+  unless Settings turns off checking for newer versions. Nothing is shown when the
+  check can't reach GitHub.
+- **System information:** versions of termSwitch, the OS, Python, Qt, PySide6 and the
+  AWS CLI, the terminal backend and the config file path. **Copy** puts it on the
+  clipboard for a bug report. It never includes profile names, account IDs, ARNs or
+  credentials.

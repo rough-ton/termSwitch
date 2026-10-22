@@ -4,7 +4,9 @@ a thin tab on the window's right edge."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import (QAbstractListModel, QModelIndex, QObject, QRunnable, QSize,
+import threading
+
+from PySide6.QtCore import (QAbstractListModel, QEvent, QModelIndex, QObject, QRunnable, QSize,
                             QThreadPool, Qt, QTimer, Signal)
 from PySide6.QtGui import (QColor, QFont, QGuiApplication, QKeySequence, QPainter, QPalette,
                            QShortcut)
@@ -15,7 +17,7 @@ from PySide6.QtWidgets import (QAbstractButton, QComboBox, QFileDialog, QFormLay
 
 from .aws_commands import Catalog, Command, load_catalog
 from .aws_params import load_spec
-from .favorites import Favorites, key_for
+from .favorites import DEFAULT_FAVORITES, Favorites, key_for
 from .icons import service_icon, star_icon
 from .param_form import ParameterForm
 
@@ -34,18 +36,29 @@ class _LoaderSignals(QObject):
     done = Signal(object)
 
 
+class _Cancelled(Exception):
+    pass
+
+
 class _LoadJob(QRunnable):
-    def __init__(self, force: bool, signals: _LoaderSignals):
+    def __init__(self, force: bool, signals: _LoaderSignals, cancel: threading.Event):
         super().__init__()
-        self.force, self.signals = force, signals
+        self.force, self.signals, self.cancel = force, signals, cancel
+
+    def _progress(self, i: int, n: int):
+        if self.cancel.is_set():
+            raise _Cancelled()        # the pane is closing: stop between models
+        self.signals.progress.emit(i, n)
 
     def run(self):
         try:
-            cat = load_catalog(force=self.force,
-                               progress=lambda i, n: self.signals.progress.emit(i, n))
+            cat = load_catalog(force=self.force, progress=self._progress)
+        except _Cancelled:
+            return
         except Exception as exc:     # never let a bad model crash the app
             cat = Catalog(notice=f"Could not read AWS CLI commands: {exc}")
-        self.signals.done.emit(cat)
+        if not self.cancel.is_set():
+            self.signals.done.emit(cat)
 
 
 # --------------------------------------------------------------------------
@@ -164,7 +177,7 @@ class CommandsPane(QWidget):
         self._by_key: dict[str, Command] = {}
         self._quiet = False          # set while the list is rebuilt around a kept selection
         self._terminal_available = False
-        self.favorites = Favorites(settings, self)
+        self.favorites = Favorites(settings, self, defaults=DEFAULT_FAVORITES)
         self.favorites.changed.connect(self._favorites_changed)
         self.setMinimumWidth(240)
 
@@ -218,8 +231,13 @@ class CommandsPane(QWidget):
         self.list.setIconSize(QSize(side, side))
         self.list.setSelectionMode(QListView.SelectionMode.SingleSelection)
         self.list.selectionModel().currentChanged.connect(lambda cur, _p: self._on_current(cur))
+        # Insert on double-click or Enter. Not `activated`: it also fires on a
+        # double-click (and on a single click on some Linux desktops), which inserted
+        # the command twice.
         self.list.doubleClicked.connect(lambda idx: self._insert_index(idx))
-        self.list.activated.connect(lambda idx: self._insert_index(idx))
+        # Enter is handled on the list itself rather than with a QShortcut, which
+        # only fires while the window is active.
+        self.list.installEventFilter(self)
         self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._list_menu)
 
@@ -271,6 +289,7 @@ class CommandsPane(QWidget):
         self._signals.progress.connect(self._on_progress)
         self._signals.done.connect(self._on_loaded)
         self._loading = False
+        self._cancel = threading.Event()
         self._on_current(QModelIndex())
 
     # ---- loading ---------------------------------------------------------
@@ -282,7 +301,11 @@ class CommandsPane(QWidget):
         self.refresh.setEnabled(False)
         self.status.setText("Reading the installed AWS CLI...")
         self.status.show()
-        QThreadPool.globalInstance().start(_LoadJob(force, self._signals))
+        QThreadPool.globalInstance().start(_LoadJob(force, self._signals, self._cancel))
+
+    def shutdown(self):
+        """Stop a running catalog load; called when the window closes."""
+        self._cancel.set()
 
     def _on_progress(self, i: int, n: int):
         if i % 25 == 0 or i == n:
@@ -408,8 +431,18 @@ class CommandsPane(QWidget):
     def set_terminal_available(self, available: bool):
         self.form.set_target(self.form.shell, self.form.region_hint, available)
 
+    def eventFilter(self, obj, event):
+        if (obj is self.list and event.type() == QEvent.Type.KeyPress
+                and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+                and not event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier):
+            self._insert_index(self.list.currentIndex())
+            return True
+        return super().eventFilter(obj, event)
+
     def _insert_index(self, index):
-        """Double-click: insert the bare command, ready for options."""
+        """Double-click or Enter: insert the bare command, ready for options."""
+        if not index.isValid() or self.model.is_missing(index.row()):
+            return
         cmd = self.model.command_at(index.row())
         if cmd:
             self.insert_requested.emit(cmd.cli + " ", False, cmd)
@@ -449,6 +482,13 @@ class CommandsPane(QWidget):
             export = menu.addAction("Export favorites...", self.export_favorites)
             export.setEnabled(len(self.favorites) > 0)
             menu.addAction("Import favorites...", self.import_favorites)
+            missing = self.favorites.missing_defaults()
+            restore = menu.addAction(
+                f"Restore default favorites ({missing})" if missing
+                else "Restore default favorites", self.restore_default_favorites)
+            restore.setEnabled(missing > 0)
+            restore.setToolTip("Add back the starter favorites you removed. Your own "
+                               "favorites are kept.")
         if not menu.isEmpty():
             menu.exec(self.list.viewport().mapToGlobal(pos))
 
@@ -480,6 +520,11 @@ class CommandsPane(QWidget):
         if rejected:
             msg += f" Skipped {rejected} invalid entr{'y' if rejected == 1 else 'ies'}."
         self._flash(msg)
+
+    def restore_default_favorites(self):
+        added = self.favorites.add_defaults()
+        self._flash(f"Added {added} default favorite(s)." if added
+                    else "All default favorites are already here.")
 
     def _flash(self, message: str, ms: int = 6000):
         """Show a message in the status line, then restore the catalog summary."""
