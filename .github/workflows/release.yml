@@ -6,6 +6,10 @@ name: Release
 #   is stamped into the app.
 # - Run it by hand (Actions > Release > Run workflow): build the downloads as
 #   run artifacts only, without publishing anything.
+# - Windows signing: when the SIGNPATH_ORGANIZATION_ID repository variable is
+#   set, the Windows build is signed for free by SignPath Foundation, verified
+#   on Windows, and only then published. A signing failure stops the release.
+#   Unset, releases are unsigned as before. Setup: docs/releasing.md.
 on:
   push:
     branches: [main]
@@ -55,6 +59,9 @@ jobs:
       contents: read
       id-token: write        # build provenance attestation
       attestations: write
+    env:
+      # The Windows build goes to SignPath first; see the sign-windows job.
+      SIGN_WINDOWS: ${{ matrix.os == 'windows-latest' && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.SIGNPATH_ORGANIZATION_ID != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -107,21 +114,114 @@ jobs:
 
       - name: Attest build provenance
         # Attestations need a public repo (or GitHub Enterprise Cloud for private).
-        if: ${{ !github.event.repository.private }}
+        # A file sent for signing is attested after signing instead.
+        if: ${{ !github.event.repository.private && env.SIGN_WINDOWS != 'true' }}
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/${{ matrix.artifact }}
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ${{ matrix.artifact }}
+          # "unsigned-..." never reaches the release; publish only takes termSwitch-*.
+          name: ${{ env.SIGN_WINDOWS == 'true' && format('unsigned-{0}', matrix.artifact) || matrix.artifact }}
           path: dist/${{ matrix.artifact }}
           if-no-files-found: error
           retention-days: 14
 
-  publish:
+  sign-windows:
+    # Free code signing for open source projects: SignPath.io, certificate by
+    # SignPath Foundation. Every job before the signing request runs on
+    # GitHub-hosted runners, as SignPath requires. The request waits for a
+    # manual approval in SignPath, so it waits here on Linux, the cheapest runner.
     needs: [version, build]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.SIGNPATH_ORGANIZATION_ID != ''
+    runs-on: ubuntu-latest
+    environment: release     # holds SIGNPATH_API_TOKEN; limited to main
+    permissions:
+      actions: read          # find and fetch the unsigned build
+      contents: read
+    steps:
+      - name: Find the unsigned Windows build
+        id: unsigned
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+                 --jq '.artifacts[] | select(.name == "unsigned-termSwitch-windows-x64.exe") | .id')
+          if [ -z "$id" ]; then echo "::error::The unsigned Windows build was not found"; exit 1; fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      - name: Sign with SignPath (waits for approval)
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'termSwitch' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
+          github-artifact-id: ${{ steps.unsigned.outputs.id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signed-termSwitch-windows-x64.exe
+          path: signed/termSwitch-windows-x64.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  verify-windows:
+    # Check the signature on Windows before anything is published.
+    needs: [version, sign-windows]
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      id-token: write        # build provenance attestation
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signed-termSwitch-windows-x64.exe
+          path: dist
+
+      - name: Verify the signature and smoke test
+        shell: pwsh
+        run: |
+          $exe = "dist/termSwitch-windows-x64.exe"
+          $sig = Get-AuthenticodeSignature $exe
+          $sig | Format-List Status, StatusMessage, SignerCertificate, TimeStamperCertificate
+          if ($sig.Status -ne 'Valid') { throw "Signature is $($sig.Status): $($sig.StatusMessage)" }
+          if ($sig.SignerCertificate.Subject -notmatch 'SignPath Foundation') {
+            throw "Unexpected signer: $($sig.SignerCertificate.Subject)"
+          }
+          if (-not $sig.TimeStamperCertificate) { throw "The signature has no timestamp" }
+          $p = Start-Process -FilePath $exe -ArgumentList '--version' -Wait -PassThru -NoNewWindow
+          if ($p.ExitCode -ne 0) { throw "termSwitch --version exited $($p.ExitCode)" }
+
+      - name: Attest build provenance
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/termSwitch-windows-x64.exe
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: termSwitch-windows-x64.exe
+          path: dist/termSwitch-windows-x64.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: [version, build, verify-windows]
+    # With signing on, a release is published only if the signed Windows build
+    # verified. With signing off, verify-windows is skipped and the unsigned
+    # build is published as before.
+    if: >-
+      always() &&
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      needs.version.result == 'success' && needs.build.result == 'success' &&
+      (needs.verify-windows.result == 'success' ||
+       (vars.SIGNPATH_ORGANIZATION_ID == '' && needs.verify-windows.result == 'skipped'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -129,6 +229,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: out
+          pattern: termSwitch-*      # never the unsigned- or signed- staging copies
           merge-multiple: true
 
       - name: Checksums
@@ -146,10 +247,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.version.outputs.version }}
+          SIGNED: ${{ needs.verify-windows.result == 'success' }}
         run: |
+          if [ "$SIGNED" = "true" ]; then
+            windows="Windows: signed by SignPath Foundation. Free code signing provided by SignPath.io, certificate by SignPath Foundation."
+          else
+            windows="Windows: not code-signed."
+          fi
+          notes="$windows
+          macOS: not code-signed. See the README for first-launch steps.
+          Verify any download against SHA256SUMS.txt."
           gh release create "v${VERSION}" out/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "termSwitch v${VERSION}" \
+            --notes "$notes" \
             --generate-notes \
             --latest
