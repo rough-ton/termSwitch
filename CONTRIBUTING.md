@@ -19,6 +19,14 @@
   what changed and why. Reference issues with `#n`, and use `Closes #n` in the commit or
   PR that finishes an issue.
 
+## Branches
+
+- Work on a branch, then open a PR into `main`. Every merge publishes a release.
+- When a PR is closed, merged or not, its branch is deleted automatically by
+  `.github/workflows/branch-cleanup.yml`. Branches with no PR yet, or with another open
+  PR, are kept.
+- A deleted branch can be restored from its PR page ("Restore branch").
+
 ## Development
 
 ```bash
