@@ -1,0 +1,217 @@
+# Using termSwitch
+
+[Back to README](../README.md)
+
+- [The main window](#the-main-window)
+- [Profiles and groups](#profiles-and-groups)
+- [Terminal tabs](#terminal-tabs)
+- [Commands pane](#commands-pane)
+- [Parameter form](#parameter-form)
+- [Run safety](#run-safety)
+- [Collapsing the Commands pane](#collapsing-the-commands-pane)
+- [Credential status and SSO](#credential-status-and-sso)
+
+## The main window
+
+![The termSwitch main window](images/main-window.png)
+
+The window has three parts: the profile tree on the left, terminal tabs in the middle,
+and the Commands pane on the right.
+
+## Profiles and groups
+
+![Profiles grouped in the tree](images/profile-groups.png)
+
+| Action | How |
+| --- | --- |
+| Open terminal tab | Double-click, Enter, Ctrl+T, or right-click (single-click is an option) |
+| Open in external terminal | Shift+double-click or Ctrl+Shift+T |
+| Open several | Multi-select then Enter, or right-click a group > Open all |
+| Move | Drag profiles or groups onto a group |
+| New group | Toolbar or Ctrl+Shift+N (`A/B` makes nested groups) |
+| Rename / delete group | F2 / right-click > Delete (contents move up one level) |
+| Status | Check all (Ctrl+Shift+R), or right-click |
+| SSO login | Button or right-click (opens your browser) |
+| Tab color | Right-click a profile > Set tab color |
+
+### How groups are stored
+
+Groups live in `~/.aws/config`, so they follow the file to any machine. Drag and drop
+rewrites only the lines it needs to, and comments and formatting are kept.
+
+```ini
+[profile acme-prod-admin]
+sso_session = acme
+sso_account_id = 111111111111
+sso_role_name = AdministratorAccess
+region = us-west-2
+x_group = Acme/Prod
+x_color = #c0392b
+```
+
+Groups with no profiles yet are kept here so they survive a reload:
+
+```ini
+[x-termswitch]
+groups = Acme/Sandbox
+```
+
+Botocore, the AWS CLI and the SDKs ignore keys and sections they do not recognize.
+Profiles without `x_group` appear in italic automatic groups. By default those are
+grouped by SSO session or credential type; change it under View > Group untagged
+profiles by. Dropping a profile on an automatic group, or on empty space, removes its
+`x_group`.
+
+## Terminal tabs
+
+![Terminal tabs for several profiles](images/terminal-tabs.png)
+
+Each profile opens in its own tab:
+
+- PowerShell on Windows (through ConPTY), your login shell on macOS
+- colored tabs (red for production)
+- 10,000 lines of scrollback, and full-screen programs such as `less`, `vim` and the
+  `aws ... help` pager
+- Shift+double-click, or Ctrl+Shift+T, opens the profile in Windows Terminal or iTerm2
+  instead. Change the default under Settings > Open profiles in.
+
+### Keyboard shortcuts
+
+| Action | Windows | macOS |
+| --- | --- | --- |
+| Copy | Ctrl+Shift+C, or Ctrl+C with text selected | Cmd+C |
+| Paste | Ctrl+V or Ctrl+Shift+V | Cmd+V |
+| Close tab | Ctrl+Shift+W | Cmd+W |
+| Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | same |
+| Focus profiles / terminal | Ctrl+1 / Ctrl+2 | same |
+| Show / hide Commands | Ctrl+Shift+K | Cmd+Shift+K |
+| Find a command | Ctrl+Shift+F | Cmd+Shift+F |
+| Scroll back | Shift+PgUp / PgDn, mouse wheel | same |
+| Clear scrollback | right-click > Clear scrollback | Cmd+K |
+
+Other keys work as usual: Ctrl+C interrupts, Ctrl+R searches history, and Tab completes.
+
+### Tab menu and shell startup
+
+Right-click a tab to duplicate, rename, restart (after the shell exits), or open the same
+profile in an external terminal.
+
+On macOS, a tab starts your normal login shell (zsh, bash or fish) with all of your
+startup files, then re-applies the tab's profile last.
+
+- If a startup file sets `AWS_PROFILE` or exports AWS keys, the tab keeps its own profile,
+  removes the keys, and prints a one-line note.
+- Your files are loaded unchanged, and zsh's `ZDOTDIR` is restored afterwards.
+- On Windows, PowerShell's profile script runs before termSwitch sets the profile, so the
+  tab's profile always wins there too.
+
+### Pasting and closing
+
+Pasting text with more than one line asks first, since each line could run as a command.
+Pasted text is stripped of control characters and escape sequences, and is sent as a
+bracketed paste when the shell supports it, so it can't inject keystrokes. Clipboard
+(OSC 52) and hyperlink (OSC 8) escape sequences from programs are ignored.
+
+Closing a tab that is running a command asks first. On Windows, any live shell counts.
+Quitting termSwitch with terminals open asks first, then ends them.
+
+## Commands pane
+
+![The Commands pane](images/commands-pane.png)
+
+To the right of the terminal tabs is a **Commands** pane listing every AWS CLI command,
+modeled on PowerShell ISE's Commands view.
+
+- **Service:** pick a service, or All. Each entry shows its full name, for example
+  `ec2 (Amazon Elastic Compute Cloud)`.
+- **Name:** filter as you type. `describe-inst` or `s3 cp` both work. Press Enter to
+  jump to the first match.
+- **The list:** alphabetical, with letter headers. Hover a command for its description.
+- **Double-click:** inserts the bare `aws <service> <command> ` at the prompt.
+
+## Parameter form
+
+![The parameter form for a selected command](images/parameter-form.png)
+
+Selecting a command shows a form built from its service model, like ISE's Show-Command
+panel:
+
+- **Required:** marked with `*` and listed first. Run and Insert stay disabled until
+  they are filled in.
+- **Optional:** collapsed when there are many, with a filter box. Each option shows the
+  model's description as a tooltip.
+- **Field types:**
+  - drop-downs for enum values
+  - whole-number fields for integers
+  - on/off/not-set choices for flags. The CLI's renamed negations are used, for example
+    `--no-reboot` / `--reboot`.
+  - space-separated lists
+  - a JSON or shorthand editor for nested options, with an **Example** button
+  - `fileb://` hints for binary input
+- **Common:**
+  - `--region` (shows the profile's region), `--output`, `--query`
+  - `--dry-run`, where the operation supports it
+  - pagination options for paginated commands: `--no-paginate`, `--max-items`,
+    `--page-size`, `--starting-token`
+  - free-form extra arguments
+- **Output file:** commands that write their result to a file, such as
+  `s3api get-object` and `lambda invoke`, ask for an output file.
+- **Live preview:** the **Command** box shows exactly what will be typed, quoted for the
+  tab's shell (PowerShell on Windows, POSIX on macOS).
+  - In PowerShell, values containing double quotes (such as JSON) are passed as
+    `file://` references to private temp files, which are removed when termSwitch
+    exits. PowerShell 5.1 and 7 hand embedded quotes to native programs differently, so
+    this is the only form that works in both.
+- **Buttons:**
+  - **Run** types the command and presses Enter.
+  - **Insert** types it without pressing Enter.
+  - **Copy** copies it.
+  - **Docs** opens the AWS CLI reference page.
+## Where the command list comes from
+
+The list comes from **the AWS CLI you have installed**, so it always matches your
+version:
+
+- **Source:** CLI v2 ships the botocore service models inside its install, and termSwitch
+  reads them from there.
+- **Naming:** the CLI's own service and command names are used. `s3api`, `deploy` and
+  `configservice` keep their CLI names, and commands the CLI removes are left out.
+- **Extra commands:** a curated list adds commands that aren't in the models, such as
+  `s3 cp`/`sync`, `sso login`, `configure`, `logs tail`, `eks update-kubeconfig` and
+  `ecr get-login-password`.
+- **Caching:** the index is cached per CLI version, so later launches are instant.
+  **Refresh** rescans, for example after you upgrade the CLI.
+- **Cache location:**
+  - Windows: `%LOCALAPPDATA%\termSwitch\cache`
+  - macOS: `~/Library/Caches/termSwitch`
+
+## Run safety
+
+![The confirmation prompt shown before a destructive command runs](images/run-confirmation.png)
+
+- Run always asks first for destructive commands: `delete-*`, `terminate-*`, `remove-*`,
+  `deregister-*`, `disable-*`, `revoke-*`, `detach-*`, `purge-*`, `s3 rm/rb/mv`, and
+  `s3 sync --delete`.
+- On a production profile, Run also asks before any command that changes something.
+- The prompt shows the profile, the account and the exact command, and Cancel is the
+  default.
+- Insert never runs anything.
+
+## Collapsing the Commands pane
+
+![The Commands pane collapsed to a tab on the right edge](images/commands-collapsed.png)
+
+- The **X** collapses the pane to a thin "Commands" tab on the right edge. Click the tab
+  to bring it back.
+- Ctrl+Shift+K toggles the pane, and Ctrl+Shift+F jumps to the Name filter.
+- The pane remembers whether it was open, and its width.
+
+## Credential status and SSO
+
+- **Status dots.** Green, orange or red dots come from `aws sts get-caller-identity`,
+  which runs in the background.
+- **SSO login.** When an SSO profile needs a login, `aws sso login` runs automatically in
+  the new terminal. You can also log in from the app. One login refreshes every profile
+  on that SSO session.
+- **Production safeguards.** Profiles that match a pattern (`prod` by default) show in
+  red and get a red tab color. By default, termSwitch asks before opening one.

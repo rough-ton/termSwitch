@@ -19,4 +19,4 @@ and the termSwitch version (`termSwitch --version`).
 - Release builds come from hash-pinned dependencies on GitHub-hosted runners, and ship
   with SHA-256 checksums.
 
-See the "Security model" section of the README for the full list.
+See the [security model](docs/security.md) for the full list.
