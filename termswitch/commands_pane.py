@@ -218,8 +218,14 @@ class CommandsPane(QWidget):
         self.list.setIconSize(QSize(side, side))
         self.list.setSelectionMode(QListView.SelectionMode.SingleSelection)
         self.list.selectionModel().currentChanged.connect(lambda cur, _p: self._on_current(cur))
+        # Insert on double-click or Enter. Not `activated`: it also fires on a
+        # double-click (and on a single click on some Linux desktops), which inserted
+        # the command twice.
         self.list.doubleClicked.connect(lambda idx: self._insert_index(idx))
-        self.list.activated.connect(lambda idx: self._insert_index(idx))
+        for key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            enter = QShortcut(QKeySequence(key), self.list)
+            enter.setContext(Qt.ShortcutContext.WidgetShortcut)
+            enter.activated.connect(lambda: self._insert_index(self.list.currentIndex()))
         self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._list_menu)
 
@@ -406,7 +412,9 @@ class CommandsPane(QWidget):
         self.form.set_target(self.form.shell, self.form.region_hint, available)
 
     def _insert_index(self, index):
-        """Double-click: insert the bare command, ready for options."""
+        """Double-click or Enter: insert the bare command, ready for options."""
+        if not index.isValid() or self.model.is_missing(index.row()):
+            return
         cmd = self.model.command_at(index.row())
         if cmd:
             self.insert_requested.emit(cmd.cli + " ", False, cmd)
