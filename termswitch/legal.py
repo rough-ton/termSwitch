@@ -103,8 +103,9 @@ class LicensesDialog(QDialog):
 
         self.list = QListWidget()
         self.list.setMaximumWidth(280)
+        from .icons import icon
         for doc in self.docs:
-            item = QListWidgetItem(doc.title)
+            item = QListWidgetItem(icon("markdown" if doc.markdown else "license"), doc.title)
             item.setData(Qt.ItemDataRole.UserRole, doc)
             self.list.addItem(item)
 
