@@ -559,9 +559,9 @@ class SettingsDialog(QDialog):
         elif imported:
             self.scheme_note.setText("Imported. Saved in termSwitch's data folder.")
         else:
-            self.scheme_note.setText("Changes are applied to open tabs immediately. Only "
-                                     "termSwitch's tabs change; your other terminals keep "
-                                     "their colors.")
+            self.scheme_note.setText("Changes are applied to open tabs immediately. Your "
+                                     "other terminal apps and their settings are not "
+                                     "changed.")
         self.preview.set_scheme(scheme_for(choice, theme.current(), self.schemes))
 
     def live_values(self) -> dict:

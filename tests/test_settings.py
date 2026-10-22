@@ -355,8 +355,9 @@ def test_terminal_tab_labels(dialog):
     form = dialog.term_scheme.parentWidget().layout()
     assert form.labelForField(dialog.term_scheme).text() == "Scheme:"
     dialog.term_scheme.setCurrentIndex(dialog.term_scheme.findData("Dracula"))
-    assert dialog.scheme_note.text().startswith(
-        "Changes are applied to open tabs immediately.")
+    assert dialog.scheme_note.text() == (
+        "Changes are applied to open tabs immediately. Your other terminal apps and their "
+        "settings are not changed.")
 
 
 def test_profiles_tab_has_a_section_per_provider(dialog):
