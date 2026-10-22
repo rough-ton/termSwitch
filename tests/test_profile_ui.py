@@ -307,3 +307,23 @@ def test_closing_the_window_stops_background_jobs(qapp, store, tmp_path, monkeyp
     close_window(w, qapp)
     assert QThreadPool.globalInstance().activeThreadCount() == 0
     assert time.monotonic() - t0 < 3
+
+
+def test_toolbar_icons_match_button_icons(window):
+    from PySide6.QtWidgets import QStyle, QToolBar
+    tb = window.findChild(QToolBar)
+    side = window.style().pixelMetric(QStyle.PixelMetric.PM_ButtonIconSize)
+    assert tb.iconSize().width() == side == tb.iconSize().height()
+
+
+def test_commands_labels_are_not_covered(window, qapp):
+    from conftest import pump
+    window.resize(1100, 600)
+    window.show()
+    pump(qapp, 0.2)
+    pane = window.commands
+    for label, field in ((pane.service_label, pane.service), (pane.name_label, pane.name)):
+        label_right = label.mapTo(pane, label.rect().topRight()).x()
+        field_left = field.mapTo(pane, field.rect().topLeft()).x()
+        assert label_right < field_left, label.text()
+        assert label.width() >= label.sizeHint().width(), label.text()

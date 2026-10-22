@@ -10,7 +10,7 @@ from PySide6.QtCore import (QAbstractListModel, QEvent, QModelIndex, QObject, QR
                             QThreadPool, Qt, QTimer, Signal)
 from PySide6.QtGui import (QColor, QFont, QGuiApplication, QKeySequence, QPainter, QPalette,
                            QShortcut)
-from PySide6.QtWidgets import (QAbstractButton, QComboBox, QFileDialog, QFormLayout,
+from PySide6.QtWidgets import (QAbstractButton, QComboBox, QFileDialog, QGridLayout,
                                QHBoxLayout, QLabel, QLineEdit, QListView, QMenu, QMessageBox,
                                QPushButton, QSizePolicy, QSplitter, QToolButton, QVBoxLayout,
                                QWidget)
@@ -218,10 +218,28 @@ class CommandsPane(QWidget):
         self.name.textChanged.connect(lambda _t: self._filter_timer.start())
         self.name.returnPressed.connect(self._select_first)
 
-        form = QFormLayout()
+        # A grid instead of QFormLayout: on macOS the form layout gave the labels
+        # less room than they need, and the Service drop-down covered "Service:".
+        form = QGridLayout()
         form.setContentsMargins(8, 4, 8, 0)
-        form.addRow("Service:", svc_row)
-        form.addRow("Name:", self.name)
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(6)
+        self.service_label = QLabel("Service:")
+        self.name_label = QLabel("Name:")
+        self.service_label.setBuddy(self.service)
+        self.name_label.setBuddy(self.name)
+        label_width = max(lbl.sizeHint().width() for lbl in (self.service_label, self.name_label))
+        for row, (label, field) in enumerate(((self.service_label, svc_row),
+                                              (self.name_label, self.name))):
+            label.setMinimumWidth(label_width)
+            label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+            label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            form.addWidget(label, row, 0)
+            if isinstance(field, QWidget):
+                form.addWidget(field, row, 1)
+            else:
+                form.addLayout(field, row, 1)
+        form.setColumnStretch(1, 1)
 
         self.model = CommandListModel(self)
         self.list = QListView()
