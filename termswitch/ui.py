@@ -32,6 +32,9 @@ from .profile_dialogs import (KIND_ROLE, KIND_SSO, ProfileDialog, SsoSessionDial
 from .deps import ERROR as DEP_ERROR, WARN as DEP_WARN, summary as dep_summary, worst
 from .depsui import DependencyDialog, DependencyRunner
 from .legal import LicensesDialog
+from . import theme
+from .term_schemes import (MATCH_APP, SchemeError, all_schemes, import_file, save_user_scheme,
+                           scheme_for)
 from .icons import (AUTO_GROUP_ICONS, PROFILE_KIND_ICONS, decorate_menu, icon as material_icon,
                     install_icon_theme, shell_icon)
 from .aws_params import is_destructive, needs_confirmation
@@ -78,6 +81,8 @@ DEFAULTS = {
     "term_scrollback": 10000,
     "confirm_close_tab": True,
     "confirm_multiline_paste": True,
+    "app_theme": theme.SYSTEM,
+    "term_scheme": MATCH_APP,
 }
 
 OPEN_MODES = [("embedded", "Embedded tab in termSwitch"), ("external", "External terminal")]
@@ -240,7 +245,7 @@ class ProfileTree(QTreeWidget):
 # --------------------------------------------------------------------------
 
 class SettingsDialog(QDialog):
-    def __init__(self, settings: QSettings, parent=None):
+    def __init__(self, settings: QSettings, parent=None, schemes: dict | None = None):
         super().__init__(parent)
         self.settings = settings
         self.setWindowTitle("Settings")
@@ -252,6 +257,24 @@ class SettingsDialog(QDialog):
         self._select(self.open_mode, get_setting(settings, "open_mode"))
         self.open_mode.setToolTip("Shift+double-click a profile to use the other one.")
         form.addRow("Open profiles in:", self.open_mode)
+
+        self.app_theme = QComboBox()
+        for value, label in theme.THEME_CHOICES:
+            self.app_theme.addItem(label, value)
+        self._select(self.app_theme, get_setting(settings, "app_theme"))
+        form.addRow("Theme:", self.app_theme)
+
+        self.schemes = schemes if schemes is not None else all_schemes()
+        self.term_scheme = QComboBox()
+        self._fill_schemes(get_setting(settings, "term_scheme"))
+        import_btn = QPushButton("Import...")
+        import_btn.setToolTip("Import a Windows Terminal (.json) or iTerm2 (.itermcolors) "
+                              "color scheme")
+        import_btn.clicked.connect(self._import_scheme)
+        scheme_row = QHBoxLayout()
+        scheme_row.addWidget(self.term_scheme, 1)
+        scheme_row.addWidget(import_btn)
+        form.addRow("Terminal colors:", scheme_row)
 
         self.font_family = QFontComboBox()
         self.font_family.setFontFilters(QFontComboBox.FontFilter.MonospacedFonts)
@@ -342,6 +365,31 @@ class SettingsDialog(QDialog):
         layout.addLayout(form)
         layout.addWidget(buttons)
 
+    def _fill_schemes(self, current: str):
+        self.term_scheme.clear()
+        self.term_scheme.addItem("Match the app theme", MATCH_APP)
+        for name in sorted(self.schemes, key=lambda n: (not self.schemes[n].builtin, n.lower())):
+            self.term_scheme.addItem(name, name)
+        self._select(self.term_scheme, current)
+
+    def _import_scheme(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import terminal colors", "",
+            "Color schemes (*.json *.itermcolors);;All files (*)")
+        if not path:
+            return
+        try:
+            imported = import_file(Path(path))
+            for scheme in imported:
+                save_user_scheme(scheme)
+        except (SchemeError, OSError) as exc:
+            QMessageBox.warning(self, "Import terminal colors", str(exc))
+            return
+        self.schemes = all_schemes()
+        self._fill_schemes(imported[0].name)
+        QMessageBox.information(self, "Import terminal colors",
+                                "Imported " + ", ".join(s.name for s in imported) + ".")
+
     @staticmethod
     def _select(combo: QComboBox, value) -> None:
         idx = combo.findData(value)
@@ -355,6 +403,8 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, "Invalid pattern", f"Production pattern: {exc}")
             return
         s = self.settings
+        s.setValue("app_theme", self.app_theme.currentData())
+        s.setValue("term_scheme", self.term_scheme.currentData())
         s.setValue("terminal", self.terminal.currentData())
         s.setValue("open_mode", self.open_mode.currentData())
         s.setValue("term_font_family", self.font_family.currentFont().family())
@@ -402,6 +452,10 @@ class MainWindow(QMainWindow):
             apply_config_file_setting(self.settings)
         self.store = store or ProfileStore()
         self.status: dict[str, StatusResult] = {}
+        self.theme = theme.manager(QApplication.instance())
+        self.theme.apply(get_setting(self.settings, "app_theme"))
+        self.theme.changed.connect(self._on_theme_changed)
+        self.schemes = all_schemes()
         self.expanded: set[str] = set(self.settings.value("expanded", [], type=list) or [])
         self._first_build = not self.settings.contains("expanded")
         self._tracking = True
@@ -523,6 +577,9 @@ class MainWindow(QMainWindow):
         self.terminals.open_external_requested.connect(
             lambda prof: self.open_profiles([prof], external=True))
         self.terminals.count_changed.connect(self._on_tab_count)
+        self.terminals.scheme_for = self._scheme_for
+        self.terminals.display_color = (
+            lambda color: theme.colors().prod if color == PROD_COLOR else color)
         self._apply_terminal_settings()
 
         self.commands = CommandsPane(settings=self.settings)
@@ -742,6 +799,30 @@ class MainWindow(QMainWindow):
             self._icons[key] = dot_icon(STATUS_COLORS[state], color)
         return self._icons[key]
 
+    def _scheme_for(self, profile: Profile | None):
+        """Terminal colors for a tab: the profile's own scheme, else the default."""
+        choice = (profile.term_scheme if profile is not None and profile.term_scheme
+                  else get_setting(self.settings, "term_scheme"))
+        return scheme_for(choice, theme.current(), self.schemes)
+
+    def _display_color(self, profile: Profile) -> str | None:
+        """Text color for a profile name: production red adjusted for the theme."""
+        color = self._profile_color(profile)
+        return theme.colors().prod if color == PROD_COLOR else color
+
+    def _on_theme_changed(self, _effective: str):
+        self.terminals.placeholder.setText(self._placeholder_html())
+        self.rebuild()
+        self.terminals.apply_schemes(self.store.profiles)
+        self.commands.model.layoutChanged.emit()
+        self.commands.form.set_favorite(self.commands.form.star.isChecked())
+
+    def set_profile_scheme(self, profiles: list[Profile], scheme: str | None):
+        for p in profiles:
+            if not self._write(self.store.set_profile_scheme, p.name, scheme):
+                return
+        self.terminals.apply_schemes(self.store.profiles)
+
     def _profile_color(self, profile: Profile) -> str | None:
         if profile.color:
             return profile.color
@@ -805,7 +886,7 @@ class MainWindow(QMainWindow):
             f = it.font(0)
             f.setItalic(True)
             it.setFont(0, f)
-            it.setForeground(0, QBrush(QColor("#8a8f98")))
+            it.setForeground(0, QBrush(QColor(theme.colors().hint)))
             it.setToolTip(0, "Automatic group for profiles without x_group.\n"
                              "Drag a profile into a named group to assign it, or\n"
                              "back here to remove its x_group.")
@@ -849,7 +930,7 @@ class MainWindow(QMainWindow):
     def _decorate_profile(self, it: QTreeWidgetItem, prof: Profile):
         result = self.status.get(prof.name)
         state = result.state if result else UNKNOWN
-        color = self._profile_color(prof)
+        color = self._display_color(prof)
         # Profile type icon with the status dot in the corner.
         it.setIcon(0, material_icon(PROFILE_KIND_ICONS.get(prof.kind, "settings"),
                                     dot=STATUS_COLORS[state]))
@@ -1129,7 +1210,7 @@ class MainWindow(QMainWindow):
         self.act_close_tab.setEnabled(count > 0)
 
     def _placeholder_html(self) -> str:
-        return ("<div style='color:#8a8f98'>"
+        return (f"<div style='color:{theme.colors().hint}'>"
                 "<h2>No terminals open</h2>"
                 "<p>Double-click a profile to open it in a tab here.<br>"
                 "Shift+double-click opens it in an external terminal instead.</p>"
@@ -1736,6 +1817,16 @@ class MainWindow(QMainWindow):
             menu.addAction("Delete..." if len(profiles) == 1 else f"Delete {len(profiles)} profiles...",
                            lambda: self.delete_profiles(profiles))
             menu.addSeparator()
+            colors_menu = menu.addMenu("Terminal colors")
+            current = {p.term_scheme for p in profiles}
+            default = colors_menu.addAction("Default", lambda: self.set_profile_scheme(profiles, None))
+            default.setCheckable(True)
+            default.setChecked(current == {None})
+            colors_menu.addSeparator()
+            for name in sorted(self.schemes, key=lambda n: (not self.schemes[n].builtin, n.lower())):
+                act = colors_menu.addAction(name, lambda n=name: self.set_profile_scheme(profiles, n))
+                act.setCheckable(True)
+                act.setChecked(current == {name})
             menu.addAction("Set tab color...", lambda: self.set_color(profiles))
             if any(p.color for p in profiles):
                 menu.addAction("Clear tab color", lambda: self.set_color(profiles, clear=True))
@@ -1770,6 +1861,7 @@ class MainWindow(QMainWindow):
     # ---- details pane ----------------------------------------------------
 
     def _show_details(self):
+        hint = theme.colors().hint
         items = self.tree.selectedItems()
         profiles = self.selected_profiles()
         self.btn_open.setEnabled(bool(profiles))
@@ -1822,18 +1914,18 @@ class MainWindow(QMainWindow):
 
         raw_keys = {"Group", "SSO start URL", "Status"}
         table = "".join(
-            f"<tr><td style='color:#8a8f98;padding-right:12px'>{k}</td>"
+            f"<tr><td style='color:{hint};padding-right:12px'>{k}</td>"
             f"<td>{cell(v, k in raw_keys)}</td></tr>" for k, v in rows if v)
         props = "".join(
-            f"<tr><td style='color:#8a8f98;padding-right:12px'><code>{html.escape(k)}</code></td>"
+            f"<tr><td style='color:{hint};padding-right:12px'><code>{html.escape(k)}</code></td>"
             f"<td><code>{html.escape(v)}</code></td></tr>" for k, v in p.display_props())
         sources = ", ".join(sorted(p.sources))
-        color = self._profile_color(p)
+        color = self._display_color(p)
         title_style = f" style='color:{color}'" if color else ""
         self.details.setHtml(
             f"<h2{title_style}>{html.escape(p.name)}</h2>"
             f"<table cellspacing=2>{table}</table>"
-            f"<h4>Raw settings <span style='color:#8a8f98;font-weight:normal'>({sources})</span></h4>"
+            f"<h4>Raw settings <span style='color:{hint};font-weight:normal'>({sources})</span></h4>"
             f"<table cellspacing=2>{props}</table>")
 
     def _group_html(self, item: QTreeWidgetItem) -> str:
@@ -1883,11 +1975,16 @@ class MainWindow(QMainWindow):
             a.setChecked(a.data() == current)
 
     def open_settings(self):
-        dlg = SettingsDialog(self.settings, self)
+        dlg = SettingsDialog(self.settings, self, schemes=self.schemes)
         if dlg.exec():
+            self.schemes = all_schemes()
             self._apply_terminal_settings()
             self._sync_auto_group_actions()
-            self.rebuild()
+            if get_setting(self.settings, "app_theme") != self.theme.mode:
+                self.theme.apply(get_setting(self.settings, "app_theme"))   # rebuilds
+            else:
+                self.rebuild()
+                self.terminals.apply_schemes(self.store.profiles)
 
     def edit_config(self):
         path = str(self.store.config_file)

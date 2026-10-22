@@ -9,12 +9,14 @@ from __future__ import annotations
 from typing import Callable
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFormLayout,
                                QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMessageBox, QPushButton,
                                QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout,
                                QWidget)
 
+from . import theme
 from .config_store import (COLOR_KEY, GROUP_KEY, PROTECTED_KEYS, ConfigError, Profile,
                            ProfileStore, key_problem, natural_key, normalize_group,
                            profile_name_problem, scrub_value, sso_session_name_problem,
@@ -130,7 +132,7 @@ class ProfileDialog(QDialog):
         hint = QLabel("Not sure of the account ID or role? Use File > Set up AWS SSO > "
                       "Sign in and pick accounts, which lets the AWS CLI list them.")
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #8a8f98;")
+        theme.set_role(hint, "hint")
         sf.addRow(hint)
 
         # --- Role page
@@ -192,13 +194,13 @@ class ProfileDialog(QDialog):
         av.addLayout(row)
         self.warning = QLabel(CREDENTIAL_PROCESS_NOTE)
         self.warning.setWordWrap(True)
-        self.warning.setStyleSheet("color: #b26a00;")
+        theme.set_role(self.warning, "warning")
         av.addWidget(self.warning)
         self._fill_table()
 
         self.error = QLabel()
         self.error.setWordWrap(True)
-        self.error.setStyleSheet("color: #d93025;")
+        theme.set_role(self.error, "error")
         self.error.hide()
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save
@@ -266,7 +268,8 @@ class ProfileDialog(QDialog):
         if readonly:
             for it in (k, v):
                 it.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-                it.setForeground(Qt.GlobalColor.gray)
+                it.setForeground(self.palette().color(QPalette.ColorGroup.Disabled,
+                                                      QPalette.ColorRole.Text))
                 it.setToolTip("termSwitch doesn't change this setting")
             k.setData(Qt.ItemDataRole.UserRole, "readonly")
         self.table.setItem(r, 0, k)
@@ -427,7 +430,7 @@ class SsoSessionDialog(QDialog):
         form.addRow("Scopes:", self.scopes)
         self.error = QLabel()
         self.error.setWordWrap(True)
-        self.error.setStyleSheet("color: #d93025;")
+        theme.set_role(self.error, "error")
         self.error.hide()
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save
                                    | QDialogButtonBox.StandardButton.Cancel)

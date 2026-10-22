@@ -36,6 +36,7 @@ from configupdater import ConfigUpdater
 
 GROUP_KEY = "x_group"
 COLOR_KEY = "x_color"
+SCHEME_KEY = "x_term_scheme"
 META_SECTION = "x-termswitch"
 LEGACY_META_SECTIONS = ("x-switchyard", "x-profile-launcher")
 META_GROUPS_KEY = "groups"
@@ -251,6 +252,12 @@ class Profile:
     @property
     def color(self) -> str | None:
         value = (self.props.get(COLOR_KEY) or "").strip()
+        return value or None
+
+    @property
+    def term_scheme(self) -> str | None:
+        """Terminal color scheme chosen for this profile, if any."""
+        value = (self.props.get(SCHEME_KEY) or "").strip()
         return value or None
 
     @property
@@ -490,6 +497,17 @@ class ProfileStore:
             self._write_meta_groups(u, remaining)
 
         self._edit(edit)
+
+    def set_profile_scheme(self, name: str, scheme: str | None) -> None:
+        """Pick a terminal color scheme for a profile; None uses the default."""
+        if scheme is not None and (_CONTROL_CHARS.search(scheme) or len(scheme) > 48
+                                   or scheme != scheme.strip() or not scheme):
+            raise ConfigError("Invalid color scheme name.")
+
+        def edit(u: ConfigUpdater) -> None:
+            _set_option(self._ensure_profile_section(u, name), SCHEME_KEY, scheme)
+
+        self._edit(edit, f"Set terminal colors for {name}")
 
     def set_profile_color(self, name: str, color: str | None) -> None:
         def edit(u: ConfigUpdater) -> None:

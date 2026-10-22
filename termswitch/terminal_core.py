@@ -15,19 +15,18 @@ DECCKM = 1 << 5             # application cursor keys
 BRACKETED_PASTE = 2004 << 5
 ALT_SCREEN_MODES = (47, 1047, 1049)
 
-# Windows Terminal "Campbell" palette.
-PALETTE = {
-    "black": "#0c0c0c", "red": "#c50f1f", "green": "#13a10e", "brown": "#c19c00",
-    "yellow": "#c19c00", "blue": "#0037da", "magenta": "#881798", "cyan": "#3a96dd",
-    "white": "#cccccc",
-    "brightblack": "#767676", "brightred": "#e74856", "brightgreen": "#16c60c",
-    "brightbrown": "#f9f1a5", "brightyellow": "#f9f1a5", "brightblue": "#3b78ff",
-    "brightmagenta": "#b4009e", "brightcyan": "#61d6d6", "brightwhite": "#f2f2f2",
-}
-DEFAULT_FG = "#cccccc"
-DEFAULT_BG = "#0c0c0c"
-CURSOR_COLOR = "#ffffff"
-SELECTION_BG = "#264f78"
+# The default dark scheme's colors. Terminal widgets use a ColorScheme
+# (term_schemes.py); these names remain for code and tests that want the defaults.
+from .term_schemes import ANSI_NAMES as _ANSI_NAMES, BUILTIN as _BUILTIN  # noqa: E402
+
+_DARK = _BUILTIN["Dark"]
+PALETTE = {**{n: _DARK.ansi[i] for i, n in enumerate(_ANSI_NAMES)},
+           **{"bright" + n: _DARK.ansi[i + 8] for i, n in enumerate(_ANSI_NAMES)},
+           "yellow": _DARK.ansi[3], "brightyellow": _DARK.ansi[11]}
+DEFAULT_FG = _DARK.foreground
+DEFAULT_BG = _DARK.background
+CURSOR_COLOR = _DARK.cursor
+SELECTION_BG = _DARK.selection
 
 
 def resolve_color(name: str, default: str) -> str:

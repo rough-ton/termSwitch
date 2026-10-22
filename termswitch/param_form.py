@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QHBoxLayout, Q
                                QLineEdit, QPlainTextEdit, QPushButton, QScrollArea,
                                QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
+from . import theme
 from .aws_commands import Command
 from .aws_params import Common, CommandSpec, Param, ParamError, render
 
@@ -107,10 +108,10 @@ class ParameterForm(QWidget):
         self.preview.setToolTip("Exactly what Insert, Run and Copy will use")
         self.error = QLabel()
         self.error.setWordWrap(True)
-        self.error.setStyleSheet("color: #d93025;")
+        theme.set_role(self.error, "error")
         self.note = QLabel()
         self.note.setWordWrap(True)
-        self.note.setStyleSheet("color: #8a8f98;")
+        theme.set_role(self.note, "hint")
 
         self.btn_run = QPushButton("Run")
         self.btn_run.setToolTip("Type the command in the active tab and press Enter")
@@ -178,8 +179,8 @@ class ParameterForm(QWidget):
                 item.widget().deleteLater()
         self.star.setVisible(spec is not None)
         if spec is None:
-            self.title.setText("<span style='color:#8a8f98'>Select a command. Double-click "
-                               "inserts it at the prompt.</span>")
+            self.title.setText(f"<span style='color:{theme.colors().hint}'>Select a command. "
+                               "Double-click inserts it at the prompt.</span>")
             self.note.clear()
             self.note.hide()
             self._update_preview()
@@ -372,14 +373,14 @@ class ParameterForm(QWidget):
                 ok = True
                 self.error.clear()
                 if self.shell == "powershell" and '"' in text:
-                    self.error.setStyleSheet("color: #8a8f98;")
+                    theme.set_role(self.error, "hint")
                     self.error.setText("Values containing double quotes are passed to the "
                                        "CLI through a private temp file (file://).")
                 else:
-                    self.error.setStyleSheet("color: #d93025;")
+                    theme.set_role(self.error, "error")
             except ParamError as exc:
                 text = ""
-                self.error.setStyleSheet("color: #d93025;")
+                theme.set_role(self.error, "error")
                 self.error.setText(str(exc))
             self.preview.setPlainText(text)
         has = self.spec is not None
