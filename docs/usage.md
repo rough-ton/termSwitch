@@ -148,6 +148,33 @@ Star the commands you use most so they're one click away.
   - With **All** selected and the Name filter empty, a **Favorites** section appears
     above the A-Z list.
   - Favorites show a star wherever they appear.
+- **Starter favorites:** on first run, termSwitch adds 30 commonly used commands,
+  taken from every command in
+  [Top 20 AWS CLI Commands Every DevOps Engineer Should Know](https://medium.com/cloud-native-chronicles/top-20-aws-cli-commands-every-devops-engineer-should-know-37fd68898a29).
+  They're added once and are yours to remove. If you already have favorites, the
+  starters are added after them. To add back any you removed, right-click in the
+  Favorites view > **Restore default favorites**; your own favorites are kept.
+
+  <details>
+  <summary>The starter favorites</summary>
+
+  | Area | Commands |
+  | --- | --- |
+  | Identity | `sts get-caller-identity` |
+  | EC2 | `ec2 describe-instances`, `ec2 start-instances`, `ec2 stop-instances`, `ec2 create-snapshot` |
+  | S3 | `s3 ls`, `s3 cp`, `s3 sync` |
+  | IAM | `iam list-users`, `iam list-roles`, `iam list-policies`, `iam list-groups`, `iam attach-user-policy`, `iam attach-group-policy`, `iam attach-role-policy` |
+  | Lambda | `lambda list-functions`, `lambda invoke` |
+  | CloudFormation | `cloudformation validate-template`, `cloudformation deploy` |
+  | Containers | `ecr get-login-password`, `ecs list-clusters`, `ecs describe-clusters`, `eks list-clusters`, `eks describe-cluster` |
+  | Logs and metrics | `logs describe-log-groups`, `logs filter-log-events`, `cloudwatch get-metric-data` |
+  | Scaling and load balancing | `autoscaling describe-auto-scaling-groups`, `elbv2 describe-load-balancers` |
+  | RDS | `rds describe-db-instances` |
+
+  The article's `aws configure` isn't included, because favorites are service and
+  command pairs.
+
+  </details>
 - **Storage:** favorites are saved in termSwitch's own settings, never in
   `~/.aws/config`.
 - **After an AWS CLI upgrade:** a favorite the installed CLI no longer has stays in the

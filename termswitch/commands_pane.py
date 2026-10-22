@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QAbstractButton, QComboBox, QFileDialog, QFormLay
 
 from .aws_commands import Catalog, Command, load_catalog
 from .aws_params import load_spec
-from .favorites import Favorites, key_for
+from .favorites import DEFAULT_FAVORITES, Favorites, key_for
 from .icons import star_icon
 from .param_form import ParameterForm
 
@@ -164,7 +164,7 @@ class CommandsPane(QWidget):
         self._by_key: dict[str, Command] = {}
         self._quiet = False          # set while the list is rebuilt around a kept selection
         self._terminal_available = False
-        self.favorites = Favorites(settings, self)
+        self.favorites = Favorites(settings, self, defaults=DEFAULT_FAVORITES)
         self.favorites.changed.connect(self._favorites_changed)
         self.setMinimumWidth(240)
 
@@ -446,6 +446,13 @@ class CommandsPane(QWidget):
             export = menu.addAction("Export favorites...", self.export_favorites)
             export.setEnabled(len(self.favorites) > 0)
             menu.addAction("Import favorites...", self.import_favorites)
+            missing = self.favorites.missing_defaults()
+            restore = menu.addAction(
+                f"Restore default favorites ({missing})" if missing
+                else "Restore default favorites", self.restore_default_favorites)
+            restore.setEnabled(missing > 0)
+            restore.setToolTip("Add back the starter favorites you removed. Your own "
+                               "favorites are kept.")
         if not menu.isEmpty():
             menu.exec(self.list.viewport().mapToGlobal(pos))
 
@@ -477,6 +484,11 @@ class CommandsPane(QWidget):
         if rejected:
             msg += f" Skipped {rejected} invalid entr{'y' if rejected == 1 else 'ies'}."
         self._flash(msg)
+
+    def restore_default_favorites(self):
+        added = self.favorites.add_defaults()
+        self._flash(f"Added {added} default favorite(s)." if added
+                    else "All default favorites are already here.")
 
     def _flash(self, message: str, ms: int = 6000):
         """Show a message in the status line, then restore the catalog summary."""
