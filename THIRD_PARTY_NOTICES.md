@@ -512,6 +512,11 @@ The built-in terminal schemes are termSwitch's own, informed by these color sets
 Both licenses are MIT; the full MIT text appears above with the Windows Terminal
 components.
 
+For **Match my system terminal**, termSwitch includes the colors of Windows Terminal's
+built-in schemes (Campbell, One Half Dark and the rest), from
+`src/cascadia/TerminalSettingsModel/defaults.json` in https://github.com/microsoft/terminal
+(MIT, Copyright (c) Microsoft Corporation; the MIT text appears above).
+
 termSwitch also bundles the published colors of these schemes, unchanged. Only the
 color values are used; no code or other files from these projects are included.
 

@@ -132,6 +132,7 @@ termswitch/
   links.py         every web address the app links to (website, GitHub, releases)
   theme.py         light and dark themes, colors with a meaning
   term_schemes.py  terminal color schemes and scheme import
+  system_terminal.py  reads Windows Terminal, iTerm2 and Terminal.app colors (read only)
   ssh_sessions.py  SSH sessions: storage, ~/.ssh/config, the ssh command, saved passwords
   ssh_dialogs.py   the SSH session editor
 tests/

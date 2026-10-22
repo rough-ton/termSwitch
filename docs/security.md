@@ -27,6 +27,11 @@ does to protect them, and what it can't protect against. To report a vulnerabili
   - Windows: `pwsh`, or the system PowerShell
   - macOS: your login shell, checked against `/etc/shells`
 
+- **Match my system terminal** reads Windows Terminal's `settings.json`, iTerm2's
+  preferences or Terminal.app's preferences to copy their colors. They're only read,
+  never written; reads are size-capped and parsed as data (JSON or property lists), and
+  every color is checked to be `#RRGGBB` before use.
+
 - Executables are resolved to absolute paths. PATH lookups skip relative entries and the
   current directory, so a planted `aws` or `wt` in the working directory is never picked
   up.

@@ -15,6 +15,8 @@ LATEST_RELEASE_URL = f"{RELEASES_URL}/latest"
 LATEST_RELEASE_API = f"https://api.github.com/repos/{REPO}/releases/latest"
 NEW_ISSUE_URL = f"{REPO_URL}/issues/new"
 NOTICES_URL = f"{REPO_URL}/blob/main/THIRD_PARTY_NOTICES.md"
+# Hundreds of color schemes as iTerm2 .itermcolors files, which termSwitch imports.
+SCHEMES_URL = "https://iterm2colorschemes.com/"
 
 
 def release_notes_url(version: str, is_release: bool) -> str:

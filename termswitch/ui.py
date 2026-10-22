@@ -15,7 +15,7 @@ from PySide6.QtGui import (QAction, QBrush, QColor, QDesktopServices, QFont, QIc
                            QKeySequence, QPainter, QPixmap, QShortcut, QGuiApplication)
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QColorDialog,
                                QComboBox, QDialog, QDialogButtonBox, QFontComboBox,
-                               QFormLayout, QSpinBox,
+                               QFormLayout, QGroupBox, QSizePolicy, QSpinBox, QTabWidget,
                                QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow,
                                QMenu, QMessageBox, QPushButton, QSplitter, QStackedWidget,
                                QStyle, QTextBrowser, QToolBar, QTreeWidget, QTreeWidgetItem,
@@ -33,8 +33,10 @@ from .deps import ERROR as DEP_ERROR, WARN as DEP_WARN, summary as dep_summary, 
 from .depsui import DependencyDialog, DependencyRunner
 from .legal import LicensesDialog
 from . import theme
-from .term_schemes import (MATCH_APP, SchemeError, all_schemes, import_file, save_user_scheme,
-                           scheme_for)
+from .term_schemes import (MATCH_APP, SchemeError, all_schemes, delete_user_scheme, import_file,
+                           save_user_scheme, scheme_for)
+from .system_terminal import MATCH_SYSTEM, SystemScheme, read_system_scheme
+from .links import SCHEMES_URL
 from .ssh_dialogs import DELETE as PW_DELETE, SET as PW_SET, SshSessionDialog
 from .ssh_sessions import (PasswordAutofill, PasswordStore, SessionError, SessionStore,
                            SshSession, display_command, key_file_problem, ssh_argv)
@@ -43,7 +45,7 @@ from .icons import (AUTO_GROUP_ICONS, PROVIDER_DOT_CORNER, PROVIDER_ICONS, decor
 from .aws_params import is_destructive, needs_confirmation
 from .commands_pane import CommandsPane, VerticalTab
 from .terminal_tabs import TerminalTabs
-from .terminal_widget import default_font
+from .terminal_widget import TerminalWidget, default_font
 from .status import CHECKING, ERROR, EXPIRED, UNKNOWN, VALID, StatusChecker, StatusResult
 
 ROLE = Qt.ItemDataRole.UserRole
@@ -90,6 +92,7 @@ DEFAULTS = {
     "confirm_multiline_paste": True,
     "app_theme": theme.SYSTEM,
     "term_scheme": MATCH_APP,
+    "term_powerline": True,
 }
 
 OPEN_MODES = [("embedded", "Embedded tab in termSwitch"), ("external", "External terminal")]
@@ -251,42 +254,149 @@ class ProfileTree(QTreeWidget):
 # Settings dialog
 # --------------------------------------------------------------------------
 
+class SchemePreview(QWidget):
+    """A small sample of a color scheme: a prompt line and the 16 colors."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.scheme = None
+        self.setMinimumHeight(64)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def set_scheme(self, scheme) -> None:
+        self.scheme = scheme
+        self.update()
+
+    def paintEvent(self, event):
+        from PySide6.QtGui import QPainter
+        p = QPainter(self)
+        r = self.rect()
+        if self.scheme is None:
+            p.end()
+            return
+        s = self.scheme
+        p.fillRect(r, QColor(s.background))
+        font = default_font()
+        p.setFont(font)
+        fm = p.fontMetrics()
+        x, y = 8, 6 + fm.ascent()
+        for text, color in (("user@host", s.ansi[2]), (" ~/project ", s.ansi[4]),
+                            ("$ ", s.foreground), ("aws sts get-caller-identity", s.foreground)):
+            p.setPen(QColor(color))
+            p.drawText(x, y, text)
+            x += fm.horizontalAdvance(text)
+        size = max(10, (r.width() - 16) // 16)
+        top = 6 + fm.height() + 6
+        for i, color in enumerate(s.ansi):
+            p.fillRect(8 + i * size, top, size - 2, r.height() - top - 6, QColor(color))
+        p.end()
+
+
 class SettingsDialog(QDialog):
-    def __init__(self, settings: QSettings, parent=None, schemes: dict | None = None):
+    """Settings in tabs: General, Terminal, Profiles and Dependencies."""
+
+    TAB_KEY = "settings_tab"
+
+    check_now_requested = Signal()
+
+    def __init__(self, settings: QSettings, parent=None, schemes: dict | None = None,
+                 system_scheme=None):
         super().__init__(parent)
         self.settings = settings
         self.setWindowTitle("Settings")
-        form = QFormLayout()
+        self.setMinimumWidth(620)
+        self.schemes = schemes if schemes is not None else all_schemes()
+        self.system_scheme = system_scheme          # SystemScheme, read when needed
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self._general_tab(), "General")
+        self.tabs.addTab(self._terminal_tab(), "Terminal")
+        self.tabs.addTab(self._profiles_tab(), "Profiles")
+        self.tabs.addTab(self._dependencies_tab(), "Dependencies")
+        self.tabs.setCurrentIndex(min(max(settings.value(self.TAB_KEY, 0, type=int), 0),
+                                      self.tabs.count() - 1))
 
-        self.open_mode = QComboBox()
-        for value, label in OPEN_MODES:
-            self.open_mode.addItem(label, value)
-        self._select(self.open_mode, get_setting(settings, "open_mode"))
-        self.open_mode.setToolTip("Shift+double-click a profile to use the other one.")
-        form.addRow("Open profiles in:", self.open_mode)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                                   | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self._save)
+        buttons.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.tabs)
+        layout.addWidget(buttons)
 
+    # ---- tabs --------------------------------------------------------------
+
+    @staticmethod
+    def _page(*groups) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        for g in groups:
+            lay.addWidget(g)
+        lay.addStretch(1)
+        return page
+
+    @staticmethod
+    def _group(title: str) -> tuple[QGroupBox, QFormLayout]:
+        box = QGroupBox(title)
+        form = QFormLayout(box)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        return box, form
+
+    def _general_tab(self) -> QWidget:
+        s = self.settings
+        look, form = self._group("Appearance")
         self.app_theme = QComboBox()
         for value, label in theme.THEME_CHOICES:
             self.app_theme.addItem(label, value)
-        self._select(self.app_theme, get_setting(settings, "app_theme"))
+        self._select(self.app_theme, get_setting(s, "app_theme"))
         form.addRow("Theme:", self.app_theme)
 
-        self.schemes = schemes if schemes is not None else all_schemes()
+        opening, form = self._group("Opening profiles")
+        self.open_mode = QComboBox()
+        for value, label in OPEN_MODES:
+            self.open_mode.addItem(label, value)
+        self._select(self.open_mode, get_setting(s, "open_mode"))
+        self.open_mode.setToolTip("Shift+double-click a profile to use the other one.")
+        form.addRow("Open profiles in:", self.open_mode)
+        self.single_click = QCheckBox("Open a profile with a single click")
+        self.single_click.setChecked(get_setting(s, "single_click"))
+        form.addRow("", self.single_click)
+        return self._page(look, opening)
+
+    def _terminal_tab(self) -> QWidget:
+        s = self.settings
+        colors, form = self._group("Colors")
         self.term_scheme = QComboBox()
-        self._fill_schemes(get_setting(settings, "term_scheme"))
+        self.term_scheme.currentIndexChanged.connect(self._scheme_changed)
+        form.addRow("Color scheme:", self.term_scheme)
+        self.scheme_note = QLabel()
+        self.scheme_note.setWordWrap(True)
+        theme.set_role(self.scheme_note, "hint")
+        form.addRow("", self.scheme_note)
+        self.preview = SchemePreview()
+        form.addRow("", self.preview)
         import_btn = QPushButton("Import...")
         import_btn.setToolTip("Import a Windows Terminal (.json) or iTerm2 (.itermcolors) "
                               "color scheme")
         import_btn.clicked.connect(self._import_scheme)
-        scheme_row = QHBoxLayout()
-        scheme_row.addWidget(self.term_scheme, 1)
-        scheme_row.addWidget(import_btn)
-        form.addRow("Terminal colors:", scheme_row)
+        self.remove_btn = QPushButton("Remove")
+        self.remove_btn.setToolTip("Remove the selected imported scheme")
+        self.remove_btn.clicked.connect(self._remove_scheme)
+        more = QLabel(f"<a href='{SCHEMES_URL}'>Find more schemes</a>")
+        more.setOpenExternalLinks(True)
+        more.setToolTip(SCHEMES_URL)
+        row = QHBoxLayout()
+        row.addWidget(import_btn)
+        row.addWidget(self.remove_btn)
+        row.addStretch(1)
+        row.addWidget(more)
+        form.addRow("", row)
+        self._fill_schemes(get_setting(s, "term_scheme"))
 
+        text, form = self._group("Text")
         self.font_family = QFontComboBox()
         self.font_family.setFontFilters(QFontComboBox.FontFilter.MonospacedFonts)
-        current_font = default_font(get_setting(settings, "term_font_family"),
-                                    get_setting(settings, "term_font_size"))
+        current_font = default_font(get_setting(s, "term_font_family"),
+                                    get_setting(s, "term_font_size"))
         self.font_family.setCurrentFont(current_font)
         self.font_size = QSpinBox()
         self.font_size.setRange(6, 36)
@@ -294,90 +404,145 @@ class SettingsDialog(QDialog):
         font_row = QHBoxLayout()
         font_row.addWidget(self.font_family, 1)
         font_row.addWidget(self.font_size)
-        form.addRow("Terminal font:", font_row)
-
+        form.addRow("Font:", font_row)
         self.scrollback = QSpinBox()
         self.scrollback.setRange(1000, 100000)
         self.scrollback.setSingleStep(1000)
-        self.scrollback.setValue(get_setting(settings, "term_scrollback"))
+        self.scrollback.setValue(get_setting(s, "term_scrollback"))
         form.addRow("Scrollback lines:", self.scrollback)
+        self.powerline = QCheckBox("Draw Powerline prompt separators")
+        self.powerline.setToolTip(
+            "Draws the arrow-shaped separators used by Powerlevel10k, Oh My Posh and "
+            "Starship so prompt segments meet without gaps, even without a Nerd Font. "
+            "Turn off to use your font's own separator shapes.")
+        self.powerline.setChecked(get_setting(s, "term_powerline"))
+        form.addRow("", self.powerline)
 
+        behavior, form = self._group("Behavior")
         self.confirm_close = QCheckBox("Ask before closing a tab that is running a command")
-        self.confirm_close.setChecked(get_setting(settings, "confirm_close_tab"))
-        form.addRow("", self.confirm_close)
-
+        self.confirm_close.setChecked(get_setting(s, "confirm_close_tab"))
+        form.addRow(self.confirm_close)
         self.confirm_paste = QCheckBox("Ask before pasting more than one line")
-        self.confirm_paste.setChecked(get_setting(settings, "confirm_multiline_paste"))
-        form.addRow("", self.confirm_paste)
+        self.confirm_paste.setChecked(get_setting(s, "confirm_multiline_paste"))
+        form.addRow(self.confirm_paste)
 
+        external, form = self._group("External terminal")
         self.terminal = QComboBox()
         for value, label in TERMINAL_CHOICES[platform_key()]:
             self.terminal.addItem(label, value)
-        self._select(self.terminal, get_setting(settings, "terminal"))
-        form.addRow("External terminal:", self.terminal)
-
+        self._select(self.terminal, get_setting(s, "terminal"))
+        form.addRow("Terminal:", self.terminal)
         self.new_window = QCheckBox("Open a new window instead of a new tab")
-        self.new_window.setChecked(get_setting(settings, "new_window"))
+        self.new_window.setChecked(get_setting(s, "new_window"))
         form.addRow("", self.new_window)
+        return self._page(colors, text, behavior, external)
 
-        self.auto_login = QCheckBox("Run 'aws sso login' in the terminal when the token is expired")
-        self.auto_login.setChecked(get_setting(settings, "auto_sso_login"))
-        form.addRow("", self.auto_login)
-
+    def _profiles_tab(self) -> QWidget:
+        s = self.settings
+        creds, form = self._group("Credentials")
+        self.check_startup = QCheckBox("Check credential status on startup")
+        self.check_startup.setChecked(get_setting(s, "check_on_startup"))
+        form.addRow(self.check_startup)
+        self.auto_login = QCheckBox("Run 'aws sso login' in the terminal when the token is "
+                                    "expired")
+        self.auto_login.setChecked(get_setting(s, "auto_sso_login"))
+        form.addRow(self.auto_login)
         self.export = QCheckBox("Also export temporary credentials into the environment")
         self.export.setToolTip("Uses 'aws configure export-credentials'. Useful for tools "
                                "that do not read AWS_PROFILE.")
-        self.export.setChecked(get_setting(settings, "export_credentials"))
-        form.addRow("", self.export)
+        self.export.setChecked(get_setting(s, "export_credentials"))
+        form.addRow(self.export)
 
-        self.single_click = QCheckBox("Open a profile with a single click")
-        self.single_click.setChecked(get_setting(settings, "single_click"))
-        form.addRow("", self.single_click)
-
-        self.check_startup = QCheckBox("Check credential status on startup")
-        self.check_startup.setChecked(get_setting(settings, "check_on_startup"))
-        form.addRow("", self.check_startup)
-
+        tree, form = self._group("Profile tree")
         self.auto_group = QComboBox()
         for value, label in AUTO_GROUP_MODES:
             self.auto_group.addItem(label, value)
-        self._select(self.auto_group, get_setting(settings, "auto_group"))
+        self._select(self.auto_group, get_setting(s, "auto_group"))
         form.addRow("Group untagged profiles by:", self.auto_group)
 
-        self.prod_pattern = QLineEdit(get_setting(settings, "prod_pattern"))
+        prod, form = self._group("Production")
+        self.prod_pattern = QLineEdit(get_setting(s, "prod_pattern"))
         self.prod_pattern.setToolTip("Case-insensitive regex matched against the profile name. "
                                      "Matches are shown in red and get a red tab color. "
                                      "A profile's x_color overrides this.")
         form.addRow("Production pattern:", self.prod_pattern)
-
         self.confirm_prod = QCheckBox("Ask before opening production profiles")
-        self.confirm_prod.setChecked(get_setting(settings, "confirm_prod"))
+        self.confirm_prod.setChecked(get_setting(s, "confirm_prod"))
         form.addRow("", self.confirm_prod)
+        return self._page(creds, tree, prod)
 
+    def _dependencies_tab(self) -> QWidget:
+        s = self.settings
+        checks, form = self._group("Dependency check")
         self.check_online = QCheckBox("Check pypi.org and GitHub for newer versions at startup")
         self.check_online.setToolTip("Only version numbers are fetched over HTTPS. Nothing about "
                                      "you or your profiles is sent.")
-        self.check_online.setChecked(get_setting(settings, "check_updates_online"))
-        form.addRow("Dependencies:", self.check_online)
-
+        self.check_online.setChecked(get_setting(s, "check_updates_online"))
+        form.addRow(self.check_online)
         self.dep_warnings = QCheckBox("Show the dependency window at startup for warnings")
-        self.dep_warnings.setChecked(get_setting(settings, "show_dep_warnings"))
-        form.addRow("", self.dep_warnings)
+        self.dep_warnings.setChecked(get_setting(s, "show_dep_warnings"))
+        form.addRow(self.dep_warnings)
+        note = QLabel("The check runs in the background at every launch: the AWS CLI, "
+                      "OpenSSH, bundled packages and the permissions of your config and "
+                      "key files.")
+        note.setWordWrap(True)
+        theme.set_role(note, "hint")
+        form.addRow(note)
+        run = QPushButton("Run the check now")
+        run.clicked.connect(self.check_now_requested)
+        row = QHBoxLayout()
+        row.addWidget(run)
+        row.addStretch(1)
+        form.addRow(row)
+        return self._page(checks)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
-                                   | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self._save)
-        buttons.rejected.connect(self.reject)
-        layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addWidget(buttons)
+    # ---- colors ------------------------------------------------------------
 
     def _fill_schemes(self, current: str):
+        self.term_scheme.blockSignals(True)
         self.term_scheme.clear()
         self.term_scheme.addItem("Match the app theme", MATCH_APP)
+        self.term_scheme.addItem("Match my system terminal", MATCH_SYSTEM)
+        self.term_scheme.insertSeparator(self.term_scheme.count())
         for name in sorted(self.schemes, key=lambda n: (not self.schemes[n].builtin, n.lower())):
-            self.term_scheme.addItem(name, name)
+            label = name if self.schemes[name].builtin else f"{name} (imported)"
+            self.term_scheme.addItem(label, name)
         self._select(self.term_scheme, current)
+        self.term_scheme.blockSignals(False)
+        self._scheme_changed()
+
+    def _system(self):
+        if self.system_scheme is None:
+            self.system_scheme = read_system_scheme(
+                platform_key(), theme.current() == theme.DARK,
+                self.terminal.currentData() if hasattr(self, "terminal")
+                else get_setting(self.settings, "terminal"))
+        return self.system_scheme
+
+    def _scheme_changed(self, *_):
+        choice = self.term_scheme.currentData()
+        imported = bool(choice in self.schemes and not self.schemes[choice].builtin)
+        self.remove_btn.setEnabled(imported)
+        if choice == MATCH_SYSTEM:
+            found = self._system()
+            if found.scheme is not None:
+                self.scheme_note.setText(f"Uses {found.source}'s colors ({found.detail}). "
+                                         "termSwitch only reads them; nothing is changed.")
+                self.preview.set_scheme(found.scheme)
+            else:
+                self.scheme_note.setText(f"{found.detail} Tabs use Match the app theme "
+                                         "until it can be read.")
+                self.preview.set_scheme(scheme_for(MATCH_APP, theme.current(), self.schemes))
+            return
+        if choice == MATCH_APP:
+            self.scheme_note.setText("Light colors with the light theme, dark colors with the "
+                                     "dark theme.")
+        elif imported:
+            self.scheme_note.setText("Imported. Saved in termSwitch's data folder.")
+        else:
+            self.scheme_note.setText("Changes apply to open tabs right away. Only termSwitch's "
+                                     "tabs change; your other terminals keep their colors.")
+        self.preview.set_scheme(scheme_for(choice, theme.current(), self.schemes))
 
     def _import_scheme(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -397,6 +562,27 @@ class SettingsDialog(QDialog):
         QMessageBox.information(self, "Import terminal colors",
                                 "Imported " + ", ".join(s.name for s in imported) + ".")
 
+    def _remove_scheme(self):
+        name = self.term_scheme.currentData()
+        if name not in self.schemes or self.schemes[name].builtin:
+            return
+        ok = QMessageBox.question(
+            self, "Remove color scheme",
+            f"Remove the imported scheme '{name}'? Tabs and profiles that use it go back "
+            "to the default colors.")
+        if ok != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            delete_user_scheme(name)
+        except (SchemeError, OSError) as exc:
+            QMessageBox.warning(self, "Remove color scheme", str(exc))
+            return
+        self.schemes = all_schemes()
+        current = get_setting(self.settings, "term_scheme")
+        self._fill_schemes(MATCH_APP if current == name else current)
+
+    # ---- saving ------------------------------------------------------------
+
     @staticmethod
     def _select(combo: QComboBox, value) -> None:
         idx = combo.findData(value)
@@ -407,6 +593,7 @@ class SettingsDialog(QDialog):
         try:
             re.compile(pattern)
         except re.error as exc:
+            self.tabs.setCurrentIndex(2)
             QMessageBox.warning(self, "Invalid pattern", f"Production pattern: {exc}")
             return
         s = self.settings
@@ -417,6 +604,7 @@ class SettingsDialog(QDialog):
         s.setValue("term_font_family", self.font_family.currentFont().family())
         s.setValue("term_font_size", self.font_size.value())
         s.setValue("term_scrollback", self.scrollback.value())
+        s.setValue("term_powerline", self.powerline.isChecked())
         s.setValue("confirm_close_tab", self.confirm_close.isChecked())
         s.setValue("confirm_multiline_paste", self.confirm_paste.isChecked())
         s.setValue("new_window", self.new_window.isChecked())
@@ -429,7 +617,12 @@ class SettingsDialog(QDialog):
         s.setValue("confirm_prod", self.confirm_prod.isChecked())
         s.setValue("check_updates_online", self.check_online.isChecked())
         s.setValue("show_dep_warnings", self.dep_warnings.isChecked())
+        s.setValue(self.TAB_KEY, self.tabs.currentIndex())
         self.accept()
+
+    def reject(self):
+        self.settings.setValue(self.TAB_KEY, self.tabs.currentIndex())
+        super().reject()
 
 
 def apply_config_file_setting(settings: QSettings) -> None:
@@ -439,6 +632,15 @@ def apply_config_file_setting(settings: QSettings) -> None:
     chosen = settings.value("config_file", "", type=str)
     if chosen and not os.environ.get("AWS_CONFIG_FILE"):
         os.environ["AWS_CONFIG_FILE"] = chosen
+
+
+def settings_menu_role(platform: str) -> QAction.MenuRole:
+    """On macOS, Qt puts an action with the preferences role in the app menu under
+    the old name "Preferences...". An application-specific role keeps it in the app
+    menu with its own name, "Settings...", as current macOS apps use."""
+    if platform == "darwin":
+        return QAction.MenuRole.ApplicationSpecificRole
+    return QAction.MenuRole.NoRole
 
 
 def get_setting(settings: QSettings, key: str):
@@ -463,6 +665,7 @@ class MainWindow(QMainWindow):
         self.theme.apply(get_setting(self.settings, "app_theme"))
         self.theme.changed.connect(self._on_theme_changed)
         self.schemes = all_schemes()
+        self._system_cache: SystemScheme | None = None
         self.ssh_store = SessionStore()
         self.passwords = PasswordStore()
         self.expanded: set[str] = set(self.settings.value("expanded", [], type=list) or [])
@@ -685,7 +888,10 @@ class MainWindow(QMainWindow):
         self.act_check_all.setIcon(material_icon("verified"))
         self.act_reload = action("Reload", self.reload,
                                  QStyle.StandardPixmap.SP_BrowserReload, QKeySequence.StandardKey.Refresh)
-        self.act_settings = action("Settings", self.open_settings, None, "Ctrl+,")
+        self.act_settings = action("Settings...", self.open_settings, None, "Ctrl+,")
+        self.act_settings.setIconText("Settings")
+        # macOS would rename a Settings item to "Preferences..." in the app menu.
+        self.act_settings.setMenuRole(settings_menu_role(platform_key()))
         self.act_settings.setIcon(material_icon("settings"))
         self.act_new_profile = action("New profile", lambda: self._new_profile_here())
         self.act_new_profile.setIcon(material_icon("key"))
@@ -819,7 +1025,21 @@ class MainWindow(QMainWindow):
         """Terminal colors for a tab: the profile's own scheme, else the default."""
         choice = (profile.term_scheme if profile is not None and profile.term_scheme
                   else get_setting(self.settings, "term_scheme"))
+        if choice == MATCH_SYSTEM:
+            found = self._system_scheme()
+            if found.scheme is not None:
+                return found.scheme
+            choice = MATCH_APP                   # couldn't read it: follow the app theme
         return scheme_for(choice, theme.current(), self.schemes)
+
+    def _system_scheme(self) -> SystemScheme:
+        """The user's own terminal colors, read once and again after a theme or
+        settings change. Read only."""
+        if self._system_cache is None:
+            self._system_cache = read_system_scheme(
+                platform_key(), theme.current() == theme.DARK,
+                get_setting(self.settings, "terminal"))
+        return self._system_cache
 
     def _display_color(self, profile: Profile) -> str | None:
         """Text color for a profile name: production red adjusted for the theme."""
@@ -827,6 +1047,7 @@ class MainWindow(QMainWindow):
         return theme.colors().prod if color == PROD_COLOR else color
 
     def _on_theme_changed(self, _effective: str):
+        self._system_cache = None                # light and dark can differ
         self.terminals.placeholder.setText(self._placeholder_html())
         self.rebuild()
         self.terminals.apply_schemes(self.store.profiles)
@@ -1236,9 +1457,11 @@ class MainWindow(QMainWindow):
         t.scrollback = get_setting(self.settings, "term_scrollback")
         t.confirm_close = get_setting(self.settings, "confirm_close_tab")
         t.confirm_multiline_paste = get_setting(self.settings, "confirm_multiline_paste")
+        TerminalWidget.draw_powerline = get_setting(self.settings, "term_powerline")
         for term in t.terminals():
             term.set_font(t.font)
             term.confirm_multiline_paste = t.confirm_multiline_paste
+            term.viewport().update()
 
     def close_current_tab(self):
         idx = self.terminals.tabs.currentIndex()
@@ -2409,8 +2632,10 @@ class MainWindow(QMainWindow):
 
     def open_settings(self):
         dlg = SettingsDialog(self.settings, self, schemes=self.schemes)
+        dlg.check_now_requested.connect(lambda: self.run_dependency_check(startup=False))
         if dlg.exec():
             self.schemes = all_schemes()
+            self._system_cache = None
             self._apply_terminal_settings()
             self._sync_auto_group_actions()
             if get_setting(self.settings, "app_theme") != self.theme.mode:

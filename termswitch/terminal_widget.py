@@ -130,6 +130,9 @@ class _Bridge(QObject):
 
 
 class TerminalWidget(QAbstractScrollArea):
+    # Draw Powerline separators as shapes (Settings > Terminal). Applies to all tabs.
+    draw_powerline = True
+
     title_changed = Signal(str)
     exited = Signal(object)          # exit code or None
 
@@ -472,7 +475,8 @@ class TerminalWidget(QAbstractScrollArea):
                 start = col
                 text = [char.data or " "]
                 wide = len(char.data) == 1 and col + 1 < cols and line[col + 1].data == ""
-                powerline = len(char.data) == 1 and ord(char.data) in POWERLINE
+                powerline = (self.draw_powerline and len(char.data) == 1
+                             and ord(char.data) in POWERLINE)
                 col += 2 if wide else 1
                 if not wide and not powerline:
                     while col < cols:

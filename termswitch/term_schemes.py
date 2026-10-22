@@ -221,6 +221,27 @@ def save_user_scheme(scheme: ColorScheme, folder: Path | None = None) -> Path:
     return target
 
 
+def delete_user_scheme(name: str, folder: Path | None = None) -> bool:
+    """Remove an imported scheme. Built-in schemes can't be removed."""
+    if name in BUILTIN:
+        raise SchemeError(f"'{name}' is built in and can't be removed.")
+    folder = folder or user_dir()
+    if not folder.is_dir():
+        return False
+    removed = False
+    for path in folder.glob("*.json"):
+        try:
+            if path.stat().st_size > MAX_IMPORT_BYTES:
+                continue
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and str(data.get("name", "")).strip() == name:
+            path.unlink()
+            removed = True
+    return removed
+
+
 def scheme_for(choice: str, app_theme: str, schemes: dict[str, ColorScheme]) -> ColorScheme:
     """The scheme to use: a named one, or the default for the app theme."""
     if choice and choice != MATCH_APP and choice in schemes:

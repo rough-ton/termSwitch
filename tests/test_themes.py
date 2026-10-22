@@ -71,8 +71,8 @@ def test_semantic_colors_are_readable(colors, background):
 def test_no_hard_coded_colors_in_ui_code():
     """Colors with a meaning come from theme.py. Allowed: status dots, the production
     marker, the color picker's default, icon and terminal scheme definitions."""
-    allowed_files = {"theme.py", "term_schemes.py", "terminal_core.py", "icons.py",
-                     "build_icons.py"}
+    allowed_files = {"theme.py", "term_schemes.py", "system_terminal.py", "terminal_core.py",
+                     "icons.py", "build_icons.py"}
     allowed = {"#9aa0a6", "#f2b01e", "#2ea44f", "#e8710a", "#d93025",   # status dots
                "#c0392b", "#2d7ff9"}
     found = []
