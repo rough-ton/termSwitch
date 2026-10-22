@@ -9,3 +9,10 @@ try:
     from ._version import __version__  # written by the release workflow
 except ImportError:
     __version__ = BASE_VERSION
+
+try:
+    from ._version import __commit__   # short commit of a release build
+except ImportError:
+    __commit__ = ""                    # source checkout
+
+IS_RELEASE = bool(__commit__)

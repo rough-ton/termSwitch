@@ -121,6 +121,8 @@ termswitch/
   legal.py         Help > Licenses viewer for the license and third-party notices
   profile_dialogs.py  profile and SSO session editors
   config_dialogs.py   welcome panel, config editor, backups
+  about.py         Help > About dialog and system information
+  links.py         every web address the app links to (website, GitHub, releases)
 tests/
 tools/build_icons.py
 .github/workflows/ ci.yml (tests), release.yml (builds and publishes downloads)
