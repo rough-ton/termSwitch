@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import (QFileSystemWatcher, QItemSelectionModel, QSettings, Qt, QTimer,
+from PySide6.QtCore import (QFileSystemWatcher, QSize, QItemSelectionModel, QSettings, Qt, QTimer,
                             QUrl, Signal)
 from PySide6.QtGui import (QAction, QBrush, QColor, QDesktopServices, QFont, QIcon,
                            QKeySequence, QPainter, QPixmap, QShortcut, QGuiApplication)
@@ -574,6 +574,9 @@ class MainWindow(QMainWindow):
         tb = QToolBar("Main")
         tb.setMovable(False)
         tb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        # Same icon size as push buttons (usually 16 px), not the larger toolbar default.
+        side = style.pixelMetric(QStyle.PixelMetric.PM_ButtonIconSize)
+        tb.setIconSize(QSize(side, side))
         self.addToolBar(tb)
 
         def action(text, slot, icon=None, shortcut=None):
