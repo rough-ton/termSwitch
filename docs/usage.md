@@ -23,7 +23,27 @@
 ![The termSwitch main window](images/main-window.png)
 
 The window has three parts: the profile tree on the left, terminal tabs in the middle,
-and the Commands pane on the right.
+and the Commands pane on the right. The bottom left shows the termSwitch version and a
+link to support termSwitch development, with status messages next to it.
+
+### Home view
+
+When no terminals are open, the middle shows the home view:
+
+- **New profile...** and **New SSH session...** open the same editors as the toolbar
+  and tree menus.
+- **Reopen previous tabs** opens the profiles and SSH sessions that were open in tabs
+  when termSwitch last closed. Quitting with no tabs open keeps the previous set.
+  Profiles and sessions that no longer exist are skipped, and production profiles
+  still ask first.
+- **Find a profile or SSH session** suggests names as you type. Pick one, or press
+  Enter when the text names exactly one, to open it. When a profile and an SSH session
+  share a name, the session is listed with "(SSH)" after it.
+- **Recent** shows the last nine profiles and SSH sessions you opened. Click one to
+  open it again. Renamed profiles keep their place; deleted ones drop off.
+
+Recent items and previous tabs are stored with termSwitch's other settings, as profile
+names and session IDs only.
 
 ## Getting started without a config
 

@@ -33,13 +33,14 @@ class TabInfo:
 
 
 class TerminalTabs(QStackedWidget):
-    """Shows a placeholder when empty, otherwise the terminal tabs."""
+    """Shows a home view (or a placeholder message) when empty, otherwise the
+    terminal tabs."""
 
     open_external_requested = Signal(object)     # Profile
     count_changed = Signal(int)
     terminal_state_changed = Signal()            # a shell exited or restarted
 
-    def __init__(self, placeholder_html: str = "", parent=None):
+    def __init__(self, placeholder_html: str = "", parent=None, home: QWidget | None = None):
         super().__init__(parent)
         self.font = None
         self.scrollback = 10000
@@ -52,16 +53,20 @@ class TerminalTabs(QStackedWidget):
         # Maps a profile's tab color to the text color for the current theme.
         self.display_color = lambda color: color
 
-        self.placeholder = QLabel(placeholder_html)
-        self.placeholder.setWordWrap(True)
-        self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.placeholder.setTextFormat(Qt.TextFormat.RichText)
-        holder = QWidget()
-        lay = QVBoxLayout(holder)
-        lay.addStretch(1)
-        lay.addWidget(self.placeholder)
-        lay.addStretch(1)
-        self.addWidget(holder)
+        self.home = home
+        if home is not None:
+            self.addWidget(home)
+        else:
+            self.placeholder = QLabel(placeholder_html)
+            self.placeholder.setWordWrap(True)
+            self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.placeholder.setTextFormat(Qt.TextFormat.RichText)
+            holder = QWidget()
+            lay = QVBoxLayout(holder)
+            lay.addStretch(1)
+            lay.addWidget(self.placeholder)
+            lay.addStretch(1)
+            self.addWidget(holder)
 
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
