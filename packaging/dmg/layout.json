@@ -1,0 +1,12 @@
+{
+  "_comment": "The .dmg window layout. tools/make_dmg_background.py draws the background from it and packaging/dmg/settings.py places the icons with it, so the two always agree. Units are Finder points; the @2x background is twice the size.",
+  "window": {"width": 640, "height": 400},
+  "icon_size": 128,
+  "text_size": 13,
+  "app": {"x": 165, "y": 232},
+  "applications": {"x": 475, "y": 232},
+  "label_pill": {"width": 150, "height": 26, "offset_y": 84},
+  "title": {"text": "termSwitch", "y": 72},
+  "subtitle": {"text": "Drag termSwitch to your Applications folder to install it.", "y": 108},
+  "footer": {"text": "Then eject this disk and open termSwitch from Applications.", "y": 366}
+}

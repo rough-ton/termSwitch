@@ -106,11 +106,18 @@ jobs:
             | grep -qF "termSwitch ${{ needs.version.outputs.version }}"
           "$app/Contents/MacOS/termSwitch" --check --offline || true
           codesign --verify --deep --strict "$app" || echo "::warning::codesign verification failed"
-          mkdir dmg
-          cp -R "$app" dmg/
-          ln -s /Applications dmg/Applications
-          hdiutil create -volname termSwitch -srcfolder dmg -ov -format UDZO "dist/${{ matrix.artifact }}"
+          # The install window: background, app and Applications link placed from
+          # packaging/dmg/layout.json (see packaging/dmg/settings.py).
+          python -m dmgbuild -s packaging/dmg/settings.py -D app="$app" \
+            termSwitch "dist/${{ matrix.artifact }}"
+          # Mount it read-only and check the layout landed as designed.
+          mnt=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "dist/${{ matrix.artifact }}"
+          status=0
+          python tools/check_dmg.py "$mnt" || status=$?
+          hdiutil detach "$mnt" -quiet || hdiutil detach "$mnt" -force -quiet
           ls -l "dist/${{ matrix.artifact }}"
+          exit $status
 
       - name: Attest build provenance
         # Attestations need a public repo (or GitHub Enterprise Cloud for private).

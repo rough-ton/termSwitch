@@ -49,6 +49,37 @@ The `.spec` file builds one self-contained file on Windows. macOS apps must be b
 and PyInstaller no longer supports one-file `.app` builds, so on macOS the single
 download is a `.dmg`.
 
+### The macOS install window
+
+The `.dmg` opens to a branded install window: the termSwitch title and instructions,
+the app on the left, an arrow, and the Applications folder on the right. To build it
+from the `.app`:
+
+```bash
+python -m dmgbuild -s packaging/dmg/settings.py -D app=dist/termSwitch.app \
+  termSwitch dist/termSwitch-macos-arm64.dmg
+```
+
+To check a built image the way the release workflow does:
+
+```bash
+mnt=$(mktemp -d) && hdiutil attach -nobrowse -readonly -mountpoint "$mnt" dist/termSwitch-macos-arm64.dmg
+python tools/check_dmg.py "$mnt"; hdiutil detach "$mnt"
+```
+
+The window layout lives in `packaging/dmg/layout.json`: window size, icon positions,
+icon and label sizes, and the text. After changing it, redraw the background (it reads
+the same file, so icons stay on their spots) and look at the preview, which shows the
+icons and Finder's labels in light and dark mode:
+
+```bash
+python tools/make_dmg_background.py --preview dmg-preview.png
+```
+
+Finder draws each icon's name in black in light mode and white in dark mode, and a
+`.dmg` can't change that, so the background puts a mid-grey pill behind each name that
+reads with either.
+
 The `.app` includes the Automation usage string shown in the "termSwitch wants to
 control Terminal" prompt. UPX compression is off because antivirus tools often flag it.
 

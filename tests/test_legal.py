@@ -9,8 +9,10 @@ NOTICES = ROOT / "THIRD_PARTY_NOTICES.md"
 LOCKS = ["requirements.lock", "requirements-build.lock"]
 # Build-only packages that are not shipped inside the app. PyInstaller itself is listed
 # because its bootloader is embedded; its helper packages are not.
+# Build tools whose code never ships in the app. dmgbuild, ds-store and mac-alias only
+# write the .dmg's window layout (.DS_Store and an alias); none of their code is in it.
 BUILD_ONLY = {"altgraph", "macholib", "packaging", "pefile", "pyinstaller-hooks-contrib",
-              "pywin32-ctypes", "setuptools"}
+              "pywin32-ctypes", "setuptools", "dmgbuild", "ds-store", "mac-alias"}
 
 
 def _locked(lock):
