@@ -329,3 +329,16 @@ or other dealings in this Font Software without prior written authorization from
 Gnome Foundation or Bitstream Inc., respectively. For further information, contact:
 fonts at gnome dot org.
 ```
+
+## Terminal color schemes
+
+The built-in terminal schemes are termSwitch's own, informed by these color sets:
+
+- **Dark** starts from the "Campbell" scheme of Windows Terminal
+  (https://github.com/microsoft/terminal, MIT, Copyright (c) Microsoft Corporation),
+  with lighter blue and magenta.
+- **Light** uses colors from GitHub's Primer design system
+  (https://github.com/primer/primitives, MIT, Copyright (c) 2018 GitHub Inc.).
+
+Both licenses are MIT; the full MIT text appears above with the Windows Terminal
+components.

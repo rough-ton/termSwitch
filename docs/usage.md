@@ -14,6 +14,7 @@
 - [Run safety](#run-safety)
 - [Collapsing the Commands pane](#collapsing-the-commands-pane)
 - [Credential status and SSO](#credential-status-and-sso)
+- [Themes and terminal colors](#themes-and-terminal-colors)
 - [About termSwitch](#about-termswitch)
 
 ## The main window
@@ -356,6 +357,32 @@ version:
   on that SSO session.
 - **Production safeguards.** Profiles that match a pattern (`prod` by default) show in
   red and get a red tab color. By default, termSwitch asks before opening one.
+
+## Themes and terminal colors
+
+Settings has the appearance options:
+
+- **Theme:** Follow system (the default), Light or Dark. termSwitch looks the same on
+  Windows and macOS in each. With Follow system, it switches when the OS does, without
+  a restart.
+- **Terminal colors:** the color scheme for terminal tabs.
+  - **Match the app theme** (the default) uses the built-in Light scheme with the light
+    theme, and Dark with the dark theme.
+  - Or pick one scheme for every tab: Dark, Light, High contrast, or one you imported.
+  - **Import...** reads a Windows Terminal color scheme (`.json`, a single scheme or a
+    whole `settings.json`) or an iTerm2 `.itermcolors` file. Imported schemes are saved
+    in termSwitch's data folder.
+- **Terminal font:** the font family and size for terminal tabs.
+
+To give one profile its own colors, right-click it > **Terminal colors** and pick a
+scheme, for example High contrast for production. **Default** goes back to the setting
+above. The choice is saved in `~/.aws/config` as `x_term_scheme`, next to `x_group`.
+
+Changes apply to open tabs right away; the shells keep running.
+
+Meaningful colors keep their meaning in both themes: production profiles are red,
+status dots are grey, green, orange and red, and errors in forms are red. Each theme
+uses shades chosen to stay readable on its own background.
 
 ## About termSwitch
 

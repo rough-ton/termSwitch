@@ -43,6 +43,11 @@ class TerminalTabs(QStackedWidget):
         self.confirm_close = True
         self.confirm_multiline_paste = True
         self._infos: dict[int, TabInfo] = {}
+        # Returns the color scheme for a profile (None for setup tabs). Set by the
+        # main window; the default keeps the built-in dark scheme.
+        self.scheme_for = None
+        # Maps a profile's tab color to the text color for the current theme.
+        self.display_color = lambda color: color
 
         self.placeholder = QLabel(placeholder_html)
         self.placeholder.setWordWrap(True)
@@ -74,13 +79,14 @@ class TerminalTabs(QStackedWidget):
         argv, env = embedded_command(profile, options, aws=find_aws())
         term = TerminalWidget(argv, env, font=self.font, scrollback=self.scrollback,
                               confirm_multiline_paste=self.confirm_multiline_paste)
+        if self.scheme_for:
+            term.set_scheme(self.scheme_for(profile))
         title = title or f"aws: {profile.name}"
         info = TabInfo(profile, options, term, title)
         self._infos[id(term)] = info
         idx = self.tabs.addTab(term, _color_icon(options.tab_color), title)
         self.tabs.setTabToolTip(idx, self._tooltip(profile))
-        if options.tab_color:
-            self.tabs.tabBar().setTabTextColor(idx, QColor(options.tab_color))
+        self._color_tab_text(idx, options.tab_color)
         term.exited.connect(lambda code, t=term: self._on_exited(t, code))
         self.setCurrentWidget(self.tabs)
         self.tabs.setCurrentIndex(idx)
@@ -95,6 +101,8 @@ class TerminalTabs(QStackedWidget):
         ``aws configure sso``. It isn't restarted or duplicated as a profile tab."""
         term = TerminalWidget(argv, env, font=self.font, scrollback=self.scrollback,
                               confirm_multiline_paste=self.confirm_multiline_paste)
+        if self.scheme_for:
+            term.set_scheme(self.scheme_for(None))
         info = TabInfo(None, None, term, title)
         self._infos[id(term)] = info
         idx = self.tabs.addTab(term, _color_icon(None), title)
@@ -106,6 +114,26 @@ class TerminalTabs(QStackedWidget):
         term.setFocus()
         self.count_changed.emit(self.tabs.count())
         return term
+
+    def _color_tab_text(self, idx: int, color: str | None) -> None:
+        shown = self.display_color(color) if color else None
+        self.tabs.tabBar().setTabTextColor(
+            idx, QColor(shown) if shown else self.palette().color(self.palette().ColorRole.WindowText))
+
+    def apply_schemes(self, profiles: dict | None = None) -> None:
+        """Recolor every open tab, for example after a theme or scheme change. Tabs
+        use the profile's current settings when ``profiles`` (name to Profile) has
+        it, so a scheme picked for a profile reaches its open tabs too."""
+        if not self.scheme_for:
+            return
+        for term in self.terminals():
+            info = self._infos.get(id(term))
+            profile = info.profile if info else None
+            if profile is not None and profiles and profile.name in profiles:
+                profile = profiles[profile.name]
+            term.set_scheme(self.scheme_for(profile))
+            if info and info.options is not None:
+                self._color_tab_text(self._index_of(term), info.options.tab_color)
 
     def mark_profile_gone(self, name: str, note: str) -> int:
         """Mark tabs of a deleted or renamed profile. Their shells keep running with

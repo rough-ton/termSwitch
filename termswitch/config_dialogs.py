@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QHBoxLayout, QLabel, Q
                                QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton,
                                QSplitter, QVBoxLayout, QWidget)
 
+from . import theme
 from .config_store import ProfileStore
 
 SECRETS_REFUSED = ("This config file contains access keys or session tokens. termSwitch "
@@ -42,7 +43,7 @@ class WelcomePanel(QWidget):
         self.body.setTextFormat(Qt.TextFormat.RichText)
         self.cli_note = QLabel()
         self.cli_note.setWordWrap(True)
-        self.cli_note.setStyleSheet("color: #b26a00;")
+        theme.set_role(self.cli_note, "warning")
         self.btn_sso = QPushButton("Set up AWS SSO...")
         self.btn_sso.setToolTip("Recommended: sign in through your organization's access "
                                 "portal (IAM Identity Center)")
@@ -98,12 +99,13 @@ class IniHighlighter(QSyntaxHighlighter):
                 f.setFontWeight(QFont.Weight.Bold)
             return f
 
-        self.section = fmt("#2d7ff9", bold=True)
-        self.comment = fmt("#8a8f98")
-        self.key = fmt("#a05a00")
+        c = theme.colors()
+        self.section = fmt(c.section, bold=True)
+        self.comment = fmt(c.hint)
+        self.key = fmt(c.key)
         self.error = QTextCharFormat()
         self.error.setUnderlineStyle(QTextCharFormat.UnderlineStyle.WaveUnderline)
-        self.error.setUnderlineColor(QColor("#d93025"))
+        self.error.setUnderlineColor(QColor(c.error))
         self.error_line: int | None = None    # 1-based
 
     def highlightBlock(self, text: str):
@@ -145,7 +147,7 @@ class ConfigEditorDialog(QDialog):
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
         self.position = QLabel()
-        self.position.setStyleSheet("color: #8a8f98;")
+        theme.set_role(self.position, "hint")
         bottom = QHBoxLayout()
         bottom.addWidget(self.status, 1)
         bottom.addWidget(self.position)
@@ -160,6 +162,7 @@ class ConfigEditorDialog(QDialog):
         self.position.setText(f"Line {c.blockNumber() + 1}, column {c.positionInBlock() + 1}")
 
     def _check(self) -> bool:
+        c = theme.colors()
         text = self.editor.toPlainText()
         problem = self.store.parse_problem(text if text.endswith("\n") else text + "\n")
         line = problem[0] if problem else None
@@ -168,13 +171,13 @@ class ConfigEditorDialog(QDialog):
             self.highlighter.rehighlight()
         if problem:
             where = f"Line {line}: " if line else ""
-            self.status.setText(f"<span style='color:#d93025'>{where}{problem[1]}</span>")
+            self.status.setText(f"<span style='color:{c.error}'>{where}{problem[1]}</span>")
         elif self.store.contains_secrets(text):
-            self.status.setText("<span style='color:#d93025'>termSwitch doesn't save "
+            self.status.setText(f"<span style='color:{c.error}'>termSwitch doesn't save "
                                 "access keys or session tokens in the config. Use "
                                 "~/.aws/credentials or AWS SSO.</span>")
         else:
-            self.status.setText("<span style='color:#8a8f98'>Valid. Saving makes a backup "
+            self.status.setText(f"<span style='color:{c.hint}'>Valid. Saving makes a backup "
                                 "and can be undone.</span>")
         ok = problem is None and not self.store.contains_secrets(text)
         self.btn_save.setEnabled(ok)
@@ -231,7 +234,7 @@ class BackupsDialog(QDialog):
                       "before every restore, and when the config is reset. Restoring backs "
                       "up the current file first, and can be undone.")
         note.setWordWrap(True)
-        note.setStyleSheet("color: #8a8f98;")
+        theme.set_role(note, "hint")
         buttons = QDialogButtonBox()
         self.btn_restore = buttons.addButton("Restore...", QDialogButtonBox.ButtonRole.AcceptRole)
         buttons.addButton(QDialogButtonBox.StandardButton.Close)

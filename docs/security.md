@@ -84,6 +84,15 @@ does to protect them, and what it can't protect against. To report a vulnerabili
 - Choosing another config file sets `AWS_CONFIG_FILE` for termSwitch's own status
   checks and new tabs. An `AWS_CONFIG_FILE` already set in your environment wins.
 
+## Imported color schemes
+
+- Windows Terminal and iTerm2 color files are read as data only (JSON, or an XML
+  property list), and are limited to 512 KB.
+- iTerm2 files with their own document type definitions or entities are refused before
+  parsing.
+- Every color must be `#RRGGBB`, a scheme needs exactly 16 ANSI colors, and names are
+  limited to letters, digits and simple punctuation.
+
 ## Supply chain
 
 - The dependencies are kept small:

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (QAbstractButton, QComboBox, QFileDialog, QGridLay
                                QPushButton, QSizePolicy, QSplitter, QToolButton, QVBoxLayout,
                                QWidget)
 
+from . import theme
 from .aws_commands import Catalog, Command, load_catalog
 from .aws_params import load_spec
 from .favorites import DEFAULT_FAVORITES, Favorites, key_for
@@ -152,7 +153,7 @@ class CommandListModel(QAbstractListModel):
             f.setItalic(True)
             return f
         if role == Qt.ItemDataRole.ForegroundRole and (kind != self.COMMAND or missing):
-            return QColor("#8a8f98")
+            return QColor(theme.colors().hint)
         return None
 
     def flags(self, index):
@@ -261,7 +262,7 @@ class CommandsPane(QWidget):
 
         self.status = QLabel("Loading AWS CLI commands...")
         self.status.setWordWrap(True)
-        self.status.setStyleSheet("color: #8a8f98;")
+        theme.set_role(self.status, "hint")
 
         # Parameter form for the selected command (Show-Command style).
         self.form = ParameterForm()

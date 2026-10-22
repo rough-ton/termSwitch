@@ -188,6 +188,7 @@ TEXT_ICONS: list[tuple[str, str]] = [
     (r"Copy AWS_PROFILE command", "command"),
     (r"Open SSO portal", "url"),
     (r"(Set|Clear) tab color", "palette"),
+    (r"Terminal colors", "palette"),
     (r"Restart", "folder-update"),
     # Commands pane
     (r"Refresh$", "folder-update"),
