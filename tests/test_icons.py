@@ -32,7 +32,7 @@ def test_every_mapped_icon_is_bundled_and_every_bundled_icon_is_used(qapp):
     import re
 
     from termswitch import icons
-    mapped = ({n for _p, n in icons.TEXT_ICONS} | set(icons.PROFILE_KIND_ICONS.values())
+    mapped = ({n for _p, n in icons.TEXT_ICONS}
               | set(icons.SERVICE_ICONS.values()) | set(icons.AUTO_GROUP_ICONS.values()))
     for name in mapped:
         assert (MATERIAL / f"{name}.svg").is_file(), name
@@ -103,7 +103,42 @@ def test_menus_buttons_and_toolbars_get_icons(qapp):
     w.close()
 
 
-def test_profile_kinds_have_icons():
-    from termswitch.icons import PROFILE_KIND_ICONS
-    from termswitch.ui import KIND_LABELS
-    assert set(KIND_LABELS) <= set(PROFILE_KIND_ICONS)
+def test_provider_icons_are_termswitch_artwork(qapp):
+    """AWS and SSH icons are termSwitch's own (the theme has none), drawn in the
+    Material style, and take precedence over the Material folder."""
+    from termswitch.icons import PROVIDER_ICONS, icon
+    own = ROOT / "termswitch" / "assets" / "icons" / "termswitch"
+    assert set(PROVIDER_ICONS) == {"aws", "ssh"}
+    for name in PROVIDER_ICONS.values():
+        svg = own / f"{name}.svg"
+        assert svg.is_file(), name
+        text = svg.read_text()
+        assert "<script" not in text and "href" not in text
+        assert not icon(name, dot="#2ea44f").pixmap(32, 32).isNull()
+    assert {p.stem for p in own.glob("*.svg")} == set(PROVIDER_ICONS.values())
+
+
+def test_tree_uses_the_aws_icon(qapp, tmp_path, monkeypatch):
+    from PySide6.QtCore import QSettings
+
+    from termswitch import icons, ui
+    from termswitch.config_store import ProfileStore
+    cfg = tmp_path / "config"
+    cfg.write_text("[profile a]\nregion = us-west-2\n[profile b]\nrole_arn = "
+                   "arn:aws:iam::123456789012:role/x\nsource_profile = a\n")
+    store = ProfileStore(cfg, tmp_path / "credentials")
+    settings = QSettings(str(tmp_path / "ui.ini"), QSettings.Format.IniFormat)
+    settings.setValue("check_on_startup", False)
+    monkeypatch.setattr(ui.MainWindow, "run_dependency_check", lambda *a, **k: None)
+    used = []
+    real = icons.icon.__wrapped__
+
+    def spy(name, dot=None, gray=False):
+        used.append(name)
+        return real(name, dot, gray)
+    monkeypatch.setattr(ui, "material_icon", spy)
+    w = ui.MainWindow(store=store, settings=settings)
+    w.rebuild()
+    assert used.count("aws") >= 2
+    w.close()
+    w.deleteLater()

@@ -32,7 +32,7 @@ packages = ["termswitch"]
 version = {attr = "termswitch.BASE_VERSION"}
 
 [tool.setuptools.package-data]
-termswitch = ["assets/*", "assets/icons/material/*"]
+termswitch = ["assets/*", "assets/icons/material/*", "assets/icons/termswitch/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

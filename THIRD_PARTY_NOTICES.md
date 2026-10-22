@@ -259,6 +259,11 @@ created by Philipp Kief and maintained by Material Extensions.
 - Version: commit `13025adc5ad10a5cc649528a2c1edec93069f1b9`
 - License: MIT, reproduced below and in `termswitch/assets/icons/material/LICENSE`
 
+The AWS and SSH icons in `termswitch/assets/icons/termswitch/` are termSwitch's own,
+drawn in the same style: `aws.svg` uses the cloud shape from the theme's `folder-aws`
+icon, and `ssh.svg` the terminal from its `console` icon, each recolored. They are
+covered by the same MIT license. Neither is an AWS logo.
+
 Some icons depict third-party brands, such as AWS, PowerShell, Docker, Kubernetes,
 Git and GitHub. Those marks belong to
 their owners and are used only to identify the related technology. The MIT license
