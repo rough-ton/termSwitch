@@ -492,7 +492,7 @@ class MainWindow(QMainWindow):
         self.terminals.count_changed.connect(self._on_tab_count)
         self._apply_terminal_settings()
 
-        self.commands = CommandsPane()
+        self.commands = CommandsPane(settings=self.settings)
         self.commands.close_requested.connect(lambda: self.set_commands_visible(False))
         self.commands.insert_requested.connect(self._insert_command)
         self.commands.open_url_requested.connect(lambda url: self._open_link(QUrl(url)))

@@ -6,6 +6,7 @@
 - [Profiles and groups](#profiles-and-groups)
 - [Terminal tabs](#terminal-tabs)
 - [Commands pane](#commands-pane)
+- [Favorite commands](#favorite-commands)
 - [Parameter form](#parameter-form)
 - [Run safety](#run-safety)
 - [Collapsing the Commands pane](#collapsing-the-commands-pane)
@@ -86,6 +87,7 @@ Each profile opens in its own tab:
 | Focus profiles / terminal | Ctrl+1 / Ctrl+2 | same |
 | Show / hide Commands | Ctrl+Shift+K | Cmd+Shift+K |
 | Find a command | Ctrl+Shift+F | Cmd+Shift+F |
+| Favorite the selected command (Commands pane) | Ctrl+D | Cmd+D |
 | Scroll back | Shift+PgUp / PgDn, mouse wheel | same |
 | Clear scrollback | right-click > Clear scrollback | Cmd+K |
 
@@ -128,6 +130,31 @@ modeled on PowerShell ISE's Commands view.
   jump to the first match.
 - **The list:** alphabetical, with letter headers. Hover a command for its description.
 - **Double-click:** inserts the bare `aws <service> <command> ` at the prompt.
+
+## Favorite commands
+
+![Favorite commands in the Commands pane](images/favorites.png)
+
+Star the commands you use most so they're one click away.
+
+- **Starring:**
+  - the star next to the command name in the parameter form
+  - right-click a command > **Add to favorites** or **Remove from favorites**
+  - Ctrl+D (Cmd+D on macOS) while the Commands pane has focus. In a terminal tab,
+    Ctrl+D still goes to the shell.
+- **Finding them:**
+  - **Favorites (N)**, directly under All in the Service list, shows only favorites,
+    sorted by service and name. The Name filter works there too.
+  - With **All** selected and the Name filter empty, a **Favorites** section appears
+    above the A-Z list.
+  - Favorites show a star wherever they appear.
+- **Storage:** favorites are saved in termSwitch's own settings, never in
+  `~/.aws/config`.
+- **After an AWS CLI upgrade:** a favorite the installed CLI no longer has stays in the
+  list, grayed out, with a tooltip naming the CLI version. Remove it with right-click.
+- **Moving them to another computer:** in the Favorites view, right-click >
+  **Export favorites...** saves a JSON file, and **Import favorites...** merges one in.
+  Entries that aren't valid `service command` names are skipped.
 
 ## Parameter form
 
