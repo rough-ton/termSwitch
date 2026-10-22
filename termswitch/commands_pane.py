@@ -4,7 +4,7 @@ a thin tab on the window's right edge."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import (QAbstractListModel, QModelIndex, QObject, QRunnable, QSize,
+from PySide6.QtCore import (QAbstractListModel, QEvent, QModelIndex, QObject, QRunnable, QSize,
                             QThreadPool, Qt, QTimer, Signal)
 from PySide6.QtGui import (QColor, QFont, QGuiApplication, QKeySequence, QPainter, QPalette,
                            QShortcut)
@@ -218,8 +218,13 @@ class CommandsPane(QWidget):
         self.list.setIconSize(QSize(side, side))
         self.list.setSelectionMode(QListView.SelectionMode.SingleSelection)
         self.list.selectionModel().currentChanged.connect(lambda cur, _p: self._on_current(cur))
+        # Insert on double-click or Enter. Not `activated`: it also fires on a
+        # double-click (and on a single click on some Linux desktops), which inserted
+        # the command twice.
         self.list.doubleClicked.connect(lambda idx: self._insert_index(idx))
-        self.list.activated.connect(lambda idx: self._insert_index(idx))
+        # Enter is handled on the list itself rather than with a QShortcut, which
+        # only fires while the window is active.
+        self.list.installEventFilter(self)
         self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._list_menu)
 
@@ -405,8 +410,18 @@ class CommandsPane(QWidget):
     def set_terminal_available(self, available: bool):
         self.form.set_target(self.form.shell, self.form.region_hint, available)
 
+    def eventFilter(self, obj, event):
+        if (obj is self.list and event.type() == QEvent.Type.KeyPress
+                and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+                and not event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier):
+            self._insert_index(self.list.currentIndex())
+            return True
+        return super().eventFilter(obj, event)
+
     def _insert_index(self, index):
-        """Double-click: insert the bare command, ready for options."""
+        """Double-click or Enter: insert the bare command, ready for options."""
+        if not index.isValid() or self.model.is_missing(index.row()):
+            return
         cmd = self.model.command_at(index.row())
         if cmd:
             self.insert_requested.emit(cmd.cli + " ", False, cmd)
