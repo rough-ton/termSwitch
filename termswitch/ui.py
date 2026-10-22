@@ -32,7 +32,7 @@ from .profile_dialogs import (KIND_ROLE, KIND_SSO, ProfileDialog, SsoSessionDial
 from .deps import ERROR as DEP_ERROR, WARN as DEP_WARN, summary as dep_summary, worst
 from .depsui import DependencyDialog, DependencyRunner
 from .legal import LicensesDialog
-from .icons import (AUTO_GROUP_ICONS, PROFILE_KIND_ICONS, decorate_menu, icon as material_icon,
+from .icons import (AUTO_GROUP_ICONS, PROVIDER_DOT_CORNER, PROVIDER_ICONS, decorate_menu, icon as material_icon,
                     install_icon_theme, shell_icon)
 from .aws_params import is_destructive, needs_confirmation
 from .commands_pane import CommandsPane, VerticalTab
@@ -853,9 +853,9 @@ class MainWindow(QMainWindow):
         result = self.status.get(prof.name)
         state = result.state if result else UNKNOWN
         color = self._profile_color(prof)
-        # Profile type icon with the status dot in the corner.
-        it.setIcon(0, material_icon(PROFILE_KIND_ICONS.get(prof.kind, "settings"),
-                                    dot=STATUS_COLORS[state]))
+        # Provider icon (AWS) with the status dot in the corner.
+        it.setIcon(0, material_icon(PROVIDER_ICONS["aws"], dot=STATUS_COLORS[state],
+                                    corner=PROVIDER_DOT_CORNER))
         if color:
             it.setForeground(0, QBrush(QColor(color)))
         if prof.problem:

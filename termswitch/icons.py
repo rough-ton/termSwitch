@@ -18,22 +18,36 @@ SIZES = (16, 20, 24, 32, 48, 64)
 
 
 def _svg_bytes(name: str) -> bytes:
-    path = resources.files("termswitch") / "assets" / "icons" / "material" / f"{name}.svg"
-    return path.read_bytes()
+    """termSwitch's own icons (assets/icons/termswitch) first, then the Material
+    Icon Theme set (assets/icons/material)."""
+    icons_dir = resources.files("termswitch") / "assets" / "icons"
+    for folder in ("termswitch", "material"):
+        path = icons_dir / folder / f"{name}.svg"
+        if path.is_file():
+            return path.read_bytes()
+    raise FileNotFoundError(f"no icon named {name!r}")
 
 
-def _render(renderer: QSvgRenderer, size: int, dot: str | None, gray: bool) -> QPixmap:
+def _render(renderer: QSvgRenderer, size: int, dot: str | None, gray: bool,
+            corner: str = "br") -> QPixmap:
     img = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
     img.fill(Qt.GlobalColor.transparent)
     p = QPainter(img)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     renderer.render(p, QRectF(0, 0, size, size))
     if dot:
-        # Small status/color dot in the bottom-right corner, with a dark ring
-        # so it stays visible on any icon color.
+        # Small status/color dot in the bottom-right corner. A transparent notch is
+        # cut out of the icon around it, and it has a dark ring, so it stays
+        # visible on any icon color (an orange dot on the orange AWS cloud too).
         d = max(size * 0.45, 6.0)
-        x = y = size - d
+        x = size - d
+        y = 0.0 if corner == "tr" else size - d   # "tr": top right, clear of icon text
+        gap = max(size / 16, 1.0)
         p.setPen(Qt.PenStyle.NoPen)
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+        p.setBrush(QColor(0, 0, 0))
+        p.drawEllipse(QRectF(x - 1 - gap, y - 1 - gap, d + 2 + 2 * gap, d + 2 + 2 * gap))
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
         p.setBrush(QColor(0, 0, 0, 170))
         p.drawEllipse(QRectF(x - 1, y - 1, d + 2, d + 2))
         p.setBrush(QColor(dot))
@@ -49,14 +63,16 @@ def _render(renderer: QSvgRenderer, size: int, dot: str | None, gray: bool) -> Q
 
 
 @lru_cache(maxsize=128)
-def icon(name: str, dot: str | None = None, gray: bool = False) -> QIcon:
-    """A QIcon for a bundled Material icon, optionally with a colored dot."""
+def icon(name: str, dot: str | None = None, gray: bool = False,
+         corner: str = "br") -> QIcon:
+    """A QIcon for a bundled icon, optionally with a colored dot in the bottom-right
+    ("br") or top-right ("tr") corner."""
     renderer = QSvgRenderer(QByteArray(_svg_bytes(name)))
     result = QIcon()
     if not renderer.isValid():
         return result
     for size in SIZES:
-        result.addPixmap(_render(renderer, size, dot, gray))
+        result.addPixmap(_render(renderer, size, dot, gray, corner))
     return result
 
 
@@ -266,14 +282,15 @@ def install_icon_theme(app) -> None:
 # Profiles and services
 # --------------------------------------------------------------------------
 
-# Icon for each profile type in the tree; the status dot is drawn on top.
-PROFILE_KIND_ICONS = {
-    "sso": "lock",
-    "role": "hosts",        # two arrows: switching to another role
-    "static": "key",
-    "process": "dll",       # a program that supplies credentials
-    "other": "settings",
+# Icon for each kind of connection in the tree. The status dot goes in the top-right
+# corner (PROVIDER_DOT_CORNER) so it never covers the text in the AWS icon.
+# The Material Icon Theme has no AWS or SSH file icon, so these two are termSwitch's
+# own, in the same style (see assets/icons/termswitch and THIRD_PARTY_NOTICES.md).
+PROVIDER_ICONS = {
+    "aws": "aws",       # AWS profiles: an AWS-orange cloud reading "AWS"
+    "ssh": "ssh",       # SSH sessions (planned): a teal terminal
 }
+PROVIDER_DOT_CORNER = "tr"
 
 # Icons for AWS services in the Commands pane's Service list. Services without a
 # fitting icon get none.

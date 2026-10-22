@@ -259,6 +259,12 @@ created by Philipp Kief and maintained by Material Extensions.
 - Version: commit `13025adc5ad10a5cc649528a2c1edec93069f1b9`
 - License: MIT, reproduced below and in `termswitch/assets/icons/material/LICENSE`
 
+The AWS and SSH icons in `termswitch/assets/icons/termswitch/` are termSwitch's own,
+drawn in the same style: `aws.svg` uses the cloud shape from the theme's `folder-aws`
+icon, and `ssh.svg` the terminal from its `console` icon, each recolored. They are
+covered by the same MIT license. Neither is an AWS logo. The "AWS" lettering in
+`aws.svg` is outlines of DejaVu Sans Condensed Bold glyphs; see "DejaVu fonts" below.
+
 Some icons depict third-party brands, such as AWS, PowerShell, Docker, Kubernetes,
 Git and GitHub. Those marks belong to
 their owners and are used only to identify the related technology. The MIT license
@@ -273,4 +279,53 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+## DejaVu fonts
+
+The "AWS" lettering in `termswitch/assets/icons/termswitch/aws.svg` is drawn from
+DejaVu Sans Condensed Bold glyph outlines. No font file is included.
+
+- Source: https://dejavu-fonts.github.io/
+- License: Bitstream Vera Fonts license; DejaVu changes are in the public domain.
+
+```text
+Copyright (c) 2003 by Bitstream, Inc. All Rights Reserved. Bitstream Vera is a
+trademark of Bitstream, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of the
+fonts accompanying this license ("Fonts") and associated documentation files (the
+"Font Software"), to reproduce and distribute the Font Software, including without
+limitation the rights to use, copy, merge, publish, distribute, and/or sell copies of
+the Font Software, and to permit persons to whom the Font Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright and trademark notices and this permission notice shall be
+included in all copies of one or more of the Font Software typefaces.
+
+The Font Software may be modified, altered, or added to, and in particular the
+designs of glyphs or characters in the Fonts may be modified and additional glyphs or
+characters may be added to the Fonts, only if the fonts are renamed to names not
+containing either the words "Bitstream" or the word "Vera".
+
+This License becomes null and void to the extent applicable to Fonts or Font Software
+that has been modified and is distributed under the "Bitstream Vera" names.
+
+The Font Software may be sold as part of a larger software package but no copy of one
+or more of the Font Software typefaces may be sold by itself.
+
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER
+RIGHT. IN NO EVENT SHALL BITSTREAM OR THE GNOME FOUNDATION BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR
+CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM OTHER DEALINGS IN
+THE FONT SOFTWARE.
+
+Except as contained in this notice, the names of Gnome, the Gnome Foundation, and
+Bitstream Inc., shall not be used in advertising or otherwise to promote the sale, use
+or other dealings in this Font Software without prior written authorization from the
+Gnome Foundation or Bitstream Inc., respectively. For further information, contact:
+fonts at gnome dot org.
 ```
