@@ -26,7 +26,7 @@ already set to that profile.
 - **Embedded terminals.** One tab per profile, with PowerShell on Windows and your login
   shell on macOS. Full-screen programs, scrollback and colored tabs work as expected.
 - **Commands pane.** Browse every AWS CLI command your installed CLI supports, fill in a
-  parameter form, then run, insert or copy the result.
+  parameter form, then run, insert or copy the result. Star the ones you use most.
 - **Credential status and SSO.** Status dots show which profiles have valid credentials,
   and SSO logins start automatically when needed.
 - **Production safeguards.** Production profiles show in red, and termSwitch asks before

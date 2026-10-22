@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import sys
 
 from PySide6.QtCore import QRegularExpression, Qt, QTimer, Signal
 from PySide6.QtGui import QDoubleValidator, QFont, QFontDatabase, QRegularExpressionValidator
@@ -57,6 +58,7 @@ class ParameterForm(QWidget):
     insert_requested = Signal(str, bool, object)     # command line, run, Command
     copy_requested = Signal(str)
     docs_requested = Signal(object)                  # Command
+    favorite_toggled = Signal(object)                # Command
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -73,6 +75,18 @@ class ParameterForm(QWidget):
         self.title.setWordWrap(True)
         self.title.setTextFormat(Qt.TextFormat.RichText)
         self.title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+        # Star in the header toggles the command as a favorite.
+        self.star = QToolButton()
+        self.star.setAutoRaise(True)
+        self.star.setCheckable(True)
+        self.star.clicked.connect(
+            lambda: self.spec and self.favorite_toggled.emit(self.spec.command))
+        self.set_favorite(False)
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.addWidget(self.title, 1)
+        title_row.addWidget(self.star, 0, Qt.AlignmentFlag.AlignTop)
 
         self.fields_box = QWidget()
         self.fields_layout = QVBoxLayout(self.fields_box)
@@ -119,7 +133,7 @@ class ParameterForm(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 4, 8, 0)
         lay.setSpacing(4)
-        lay.addWidget(self.title)
+        lay.addLayout(title_row)
         lay.addWidget(self.scroll, 1)
         lay.addWidget(self.note)
         lay.addWidget(QLabel("Command:"))
@@ -129,6 +143,16 @@ class ParameterForm(QWidget):
         self.set_spec(None)
 
     # ---- context ---------------------------------------------------------
+
+    def set_favorite(self, on: bool):
+        """Show whether the current command is a favorite."""
+        from .icons import star_icon
+
+        outline = self.palette().color(self.palette().ColorRole.WindowText).name()
+        self.star.setChecked(on)
+        self.star.setIcon(star_icon(on, outline))
+        tip = "Remove from favorites" if on else "Add to favorites"
+        self.star.setToolTip(f"{tip} (Ctrl+D)" if sys.platform != "darwin" else f"{tip} (Cmd+D)")
 
     def set_target(self, shell: str, region_hint: str, terminal_available: bool):
         self.shell = shell
@@ -152,6 +176,7 @@ class ParameterForm(QWidget):
             item = self.fields_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+        self.star.setVisible(spec is not None)
         if spec is None:
             self.title.setText("<span style='color:#8a8f98'>Select a command. Double-click "
                                "inserts it at the prompt.</span>")

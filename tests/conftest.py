@@ -7,6 +7,15 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _isolated_settings(tmp_path_factory):
+    """Keep QSettings() in tests away from the real user settings."""
+    from PySide6.QtCore import QSettings
+    QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope,
+                      str(tmp_path_factory.mktemp("settings")))
+
+
 @pytest.fixture(scope="session")
 def qapp():
     from PySide6.QtWidgets import QApplication

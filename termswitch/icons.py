@@ -74,3 +74,50 @@ AUTO_GROUP_ICONS = {
     "static": "folder-keys",
     "other": "folder-base",
 }
+
+
+# Favorite stars, drawn as vector paths so they stay sharp at any scale. Amber reads
+# well on both light and dark backgrounds; the outline uses the text color passed in.
+STAR_COLOR = "#e0a030"
+
+
+def _star_path(size: float):
+    import math
+
+    from PySide6.QtGui import QPainterPath
+
+    path = QPainterPath()
+    cx = cy = size / 2
+    outer, inner = size * 0.46, size * 0.19
+    for i in range(10):
+        r = outer if i % 2 == 0 else inner
+        a = math.radians(-90 + i * 36)
+        x, y = cx + r * math.cos(a), cy + r * math.sin(a) + size * 0.03
+        path.moveTo(x, y) if i == 0 else path.lineTo(x, y)
+    path.closeSubpath()
+    return path
+
+
+@lru_cache(maxsize=16)
+def star_icon(filled: bool, outline: str = "#8a8f98", empty: bool = False) -> QIcon:
+    """A star for favorites. ``empty=True`` gives a blank icon of the same size, so
+    list rows without a star keep their text aligned with rows that have one."""
+    from PySide6.QtGui import QPen
+
+    ic = QIcon()
+    for size in (16, 32):
+        pm = QPixmap(size, size)
+        pm.fill(Qt.GlobalColor.transparent)
+        if not empty:
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            path = _star_path(size)
+            if filled:
+                p.fillPath(path, QColor(STAR_COLOR))
+                p.setPen(QPen(QColor(STAR_COLOR).darker(120), size / 16))
+            else:
+                p.setPen(QPen(QColor(outline), size / 14))
+            p.drawPath(path)
+            p.end()
+        ic.addPixmap(pm)
+    return ic
