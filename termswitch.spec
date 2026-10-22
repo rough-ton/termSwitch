@@ -34,6 +34,11 @@ if is_win:
     EXTRA_HIDDEN += w_hidden
 else:
     METADATA += copy_metadata("ptyprocess")
+if is_win or is_mac:
+    # keyring finds its backends through package metadata (entry points). Only the
+    # system store backend for this platform is used (see ssh_sessions.PasswordStore).
+    METADATA += copy_metadata("keyring")
+    EXTRA_HIDDEN += ["keyring.backends.Windows" if is_win else "keyring.backends.macOS"]
 
 # License texts shown in Help > Licenses (termswitch/legal.py reads them from here).
 # On macOS, PyInstaller places data files in termSwitch.app/Contents/Resources.

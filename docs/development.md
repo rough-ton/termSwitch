@@ -57,6 +57,12 @@ python -m pytest -q
 
 CI runs them on Windows, macOS and Linux with Python 3.12 and 3.13.
 
+A test fails at once if the code opens a message box, input dialog, file dialog or
+other modal dialog that the test didn't patch, and the failure names the dialog and
+its text. Without this, a dialog waits for a click that never comes and CI hangs until
+the job times out. Patch the dialog in tests that expect one (see `press` and
+`accept_with` in `tests/test_profile_ui.py`).
+
 ## Dependency locks
 
 `requirements.lock`, `requirements-build.lock` and `requirements-dev.lock` pin exact
@@ -100,6 +106,7 @@ that every image and relative link in the docs resolves.
 ```
 termswitch/
   config_store.py  read profiles, write groups back safely
+  fileutil.py      file replace that retries while Windows holds a file open
   launcher.py      safe executable lookup and terminal commands
   status.py        background sts checks and SSO logins
   deps.py          dependency and security checks (--check)
@@ -123,6 +130,10 @@ termswitch/
   config_dialogs.py   welcome panel, config editor, backups
   about.py         Help > About dialog and system information
   links.py         every web address the app links to (website, GitHub, releases)
+  theme.py         light and dark themes, colors with a meaning
+  term_schemes.py  terminal color schemes and scheme import
+  ssh_sessions.py  SSH sessions: storage, ~/.ssh/config, the ssh command, saved passwords
+  ssh_dialogs.py   the SSH session editor
 tests/
 tools/build_icons.py
 .github/workflows/ ci.yml (tests), release.yml (builds and publishes downloads)

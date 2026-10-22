@@ -12,9 +12,15 @@ Versions are the ones pinned in `requirements.lock` and `requirements-build.lock
 | Package | Version | License | Source |
 | --- | --- | --- | --- |
 | `configupdater` | 4.0 | MIT | https://github.com/pyscaffold/configupdater |
+| `jaraco-classes` | 3.4.0 | MIT | https://github.com/jaraco/jaraco.classes |
+| `jaraco-context` | 6.1.2 | MIT | https://github.com/jaraco/jaraco.context |
+| `jaraco-functools` | 4.6.0 | MIT | https://github.com/jaraco/jaraco.functools |
+| `keyring` | 25.7.0 | MIT | https://github.com/jaraco/keyring |
+| `more-itertools` | 11.2.1 | MIT | https://github.com/more-itertools/more-itertools |
 | `ptyprocess` | 0.7.0 | ISC | https://github.com/pexpect/ptyprocess |
 | `pyside6-essentials` | 6.12.0 | LGPL-3.0-only | https://code.qt.io/cgit/pyside/pyside-setup.git/ |
 | `pyte` | 0.8.2 | LGPL-3.0-only | https://github.com/selectel/pyte |
+| `pywin32-ctypes` | 0.2.3 | BSD-3-Clause | https://github.com/enthought/pywin32-ctypes |
 | `pywinpty` | 3.1.0 | MIT | https://github.com/andfoy/pywinpty |
 | `shiboken6` | 6.12.0 | LGPL-3.0-only | https://code.qt.io/cgit/pyside/pyside-setup.git/ |
 | `wcwidth` | 0.9.3 | MIT | https://github.com/jquast/wcwidth |
@@ -22,7 +28,9 @@ Versions are the ones pinned in `requirements.lock` and `requirements-build.lock
 | Python runtime | 3.13 | PSF-2.0 | https://www.python.org/downloads/source/ |
 | Material Icon Theme (icons) | `13025ad` | MIT | https://github.com/material-extensions/vscode-material-icon-theme |
 
-`ptyprocess` is in the macOS build only. `pywinpty`, with the winpty and Windows ConPTY
+`ptyprocess` is in the macOS build only. `keyring` and the `jaraco` and
+`more-itertools` packages it uses are in the macOS and Windows builds, for saving SSH
+passwords in the system password store; `pywin32-ctypes` is in the Windows build only. `pywinpty`, with the winpty and Windows ConPTY
 components it ships, is in the Windows build only.
 
 ## Qt for Python (PySide6-Essentials and shiboken6)
@@ -114,6 +122,166 @@ Markus Kuhn -- 2007-05-26 (Unicode 5.0)
 Permission to use, copy, modify, and distribute this software
 for any purpose and without fee is hereby granted. The author
 disclaims all warranties with regard to this software.
+```
+
+## keyring (macOS and Windows builds)
+
+Used only to save and read SSH passwords in the macOS Keychain or the Windows
+Credential Manager. https://github.com/jaraco/keyring, by Jason R. Coombs and
+contributors.
+
+```text
+MIT License
+
+Copyright (c) 2025 <copyright holders>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the
+following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial
+portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
+LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO
+EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### jaraco.classes, jaraco.context, jaraco.functools
+
+Used by keyring. By Jason R. Coombs and contributors.
+
+jaraco.classes:
+
+```text
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to
+deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+```
+
+jaraco.context:
+
+```text
+MIT License
+
+Copyright (c) 2026 <copyright holders>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the
+following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial
+portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
+LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO
+EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+jaraco.functools:
+
+```text
+MIT License
+
+Copyright (c) 2026 <copyright holders>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the
+following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial
+portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
+LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO
+EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### more-itertools
+
+Used by keyring.
+
+```text
+Copyright (c) 2012 Erik Rose
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### pywin32-ctypes (Windows build)
+
+Used by keyring to reach the Windows Credential Manager.
+
+```text
+This software is OSI Certified Open Source Software.
+OSI Certified is a certification mark of the Open Source Initiative.
+
+Copyright (c) 2014, Enthought, Inc.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+ * Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+ * Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+ * Neither the name of Enthought, Inc. nor the names of its contributors may
+   be used to endorse or promote products derived from this software without
+   specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
 ## ptyprocess (macOS build)
@@ -259,6 +427,12 @@ created by Philipp Kief and maintained by Material Extensions.
 - Version: commit `13025adc5ad10a5cc649528a2c1edec93069f1b9`
 - License: MIT, reproduced below and in `termswitch/assets/icons/material/LICENSE`
 
+The AWS and SSH icons in `termswitch/assets/icons/termswitch/` are termSwitch's own,
+drawn in the same style: `aws.svg` uses the cloud shape from the theme's `folder-aws`
+icon, and `ssh.svg` the terminal from its `console` icon, each recolored. They are
+covered by the same MIT license. Neither is an AWS logo. The "AWS" lettering in
+`aws.svg` is outlines of DejaVu Sans Condensed Bold glyphs; see "DejaVu fonts" below.
+
 Some icons depict third-party brands, such as AWS, PowerShell, Docker, Kubernetes,
 Git and GitHub. Those marks belong to
 their owners and are used only to identify the related technology. The MIT license
@@ -274,3 +448,65 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
+
+## DejaVu fonts
+
+The "AWS" lettering in `termswitch/assets/icons/termswitch/aws.svg` is drawn from
+DejaVu Sans Condensed Bold glyph outlines. No font file is included.
+
+- Source: https://dejavu-fonts.github.io/
+- License: Bitstream Vera Fonts license; DejaVu changes are in the public domain.
+
+```text
+Copyright (c) 2003 by Bitstream, Inc. All Rights Reserved. Bitstream Vera is a
+trademark of Bitstream, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of the
+fonts accompanying this license ("Fonts") and associated documentation files (the
+"Font Software"), to reproduce and distribute the Font Software, including without
+limitation the rights to use, copy, merge, publish, distribute, and/or sell copies of
+the Font Software, and to permit persons to whom the Font Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright and trademark notices and this permission notice shall be
+included in all copies of one or more of the Font Software typefaces.
+
+The Font Software may be modified, altered, or added to, and in particular the
+designs of glyphs or characters in the Fonts may be modified and additional glyphs or
+characters may be added to the Fonts, only if the fonts are renamed to names not
+containing either the words "Bitstream" or the word "Vera".
+
+This License becomes null and void to the extent applicable to Fonts or Font Software
+that has been modified and is distributed under the "Bitstream Vera" names.
+
+The Font Software may be sold as part of a larger software package but no copy of one
+or more of the Font Software typefaces may be sold by itself.
+
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER
+RIGHT. IN NO EVENT SHALL BITSTREAM OR THE GNOME FOUNDATION BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR
+CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM OTHER DEALINGS IN
+THE FONT SOFTWARE.
+
+Except as contained in this notice, the names of Gnome, the Gnome Foundation, and
+Bitstream Inc., shall not be used in advertising or otherwise to promote the sale, use
+or other dealings in this Font Software without prior written authorization from the
+Gnome Foundation or Bitstream Inc., respectively. For further information, contact:
+fonts at gnome dot org.
+```
+
+## Terminal color schemes
+
+The built-in terminal schemes are termSwitch's own, informed by these color sets:
+
+- **Dark** starts from the "Campbell" scheme of Windows Terminal
+  (https://github.com/microsoft/terminal, MIT, Copyright (c) Microsoft Corporation),
+  with lighter blue and magenta.
+- **Light** uses colors from GitHub's Primer design system
+  (https://github.com/primer/primitives, MIT, Copyright (c) 2018 GitHub Inc.).
+
+Both licenses are MIT; the full MIT text appears above with the Windows Terminal
+components.

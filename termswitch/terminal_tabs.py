@@ -27,6 +27,9 @@ class TabInfo:
     widget: TerminalWidget
     title: str
     orphaned: bool = False           # the profile was deleted or renamed since
+    ssh_session: object = None       # SshSession for SSH tabs
+    autofill: object = None          # PasswordAutofill for SSH tabs with a saved password
+    autofill_factory: object = None
 
 
 class TerminalTabs(QStackedWidget):
@@ -43,6 +46,11 @@ class TerminalTabs(QStackedWidget):
         self.confirm_close = True
         self.confirm_multiline_paste = True
         self._infos: dict[int, TabInfo] = {}
+        # Returns the color scheme for a profile (None for setup tabs). Set by the
+        # main window; the default keeps the built-in dark scheme.
+        self.scheme_for = None
+        # Maps a profile's tab color to the text color for the current theme.
+        self.display_color = lambda color: color
 
         self.placeholder = QLabel(placeholder_html)
         self.placeholder.setWordWrap(True)
@@ -74,13 +82,14 @@ class TerminalTabs(QStackedWidget):
         argv, env = embedded_command(profile, options, aws=find_aws())
         term = TerminalWidget(argv, env, font=self.font, scrollback=self.scrollback,
                               confirm_multiline_paste=self.confirm_multiline_paste)
+        if self.scheme_for:
+            term.set_scheme(self.scheme_for(profile))
         title = title or f"aws: {profile.name}"
         info = TabInfo(profile, options, term, title)
         self._infos[id(term)] = info
         idx = self.tabs.addTab(term, _color_icon(options.tab_color), title)
         self.tabs.setTabToolTip(idx, self._tooltip(profile))
-        if options.tab_color:
-            self.tabs.tabBar().setTabTextColor(idx, QColor(options.tab_color))
+        self._color_tab_text(idx, options.tab_color)
         term.exited.connect(lambda code, t=term: self._on_exited(t, code))
         self.setCurrentWidget(self.tabs)
         self.tabs.setCurrentIndex(idx)
@@ -95,10 +104,64 @@ class TerminalTabs(QStackedWidget):
         ``aws configure sso``. It isn't restarted or duplicated as a profile tab."""
         term = TerminalWidget(argv, env, font=self.font, scrollback=self.scrollback,
                               confirm_multiline_paste=self.confirm_multiline_paste)
+        if self.scheme_for:
+            term.set_scheme(self.scheme_for(None))
         info = TabInfo(None, None, term, title)
         self._infos[id(term)] = info
         idx = self.tabs.addTab(term, _color_icon(None), title)
         self.tabs.setTabToolTip(idx, tooltip or title)
+        term.exited.connect(lambda code, t=term: self._on_exited(t, code))
+        self.setCurrentWidget(self.tabs)
+        self.tabs.setCurrentIndex(idx)
+        term.start()
+        term.setFocus()
+        self.count_changed.emit(self.tabs.count())
+        return term
+
+    def _color_tab_text(self, idx: int, color: str | None) -> None:
+        shown = self.display_color(color) if color else None
+        self.tabs.tabBar().setTabTextColor(
+            idx, QColor(shown) if shown else self.palette().color(self.palette().ColorRole.WindowText))
+
+    def apply_schemes(self, profiles: dict | None = None) -> None:
+        """Recolor every open tab, for example after a theme or scheme change. Tabs
+        use the profile's current settings when ``profiles`` (name to Profile) has
+        it, so a scheme picked for a profile reaches its open tabs too."""
+        if not self.scheme_for:
+            return
+        for term in self.terminals():
+            info = self._infos.get(id(term))
+            profile = info.profile if info else None
+            if profile is not None and profiles and profile.name in profiles:
+                profile = profiles[profile.name]
+            term.set_scheme(self.scheme_for(profile))
+            if info and info.options is not None:
+                self._color_tab_text(self._index_of(term), info.options.tab_color)
+
+    def open_ssh(self, session, argv: list[str], env: dict[str, str], autofill_factory=None,
+                 tooltip: str = ""):
+        """A tab running ssh for a saved session. ``autofill_factory(term)`` may return
+        a PasswordAutofill that watches this tab's output."""
+        from .icons import PROVIDER_ICONS, icon
+        term = TerminalWidget(argv, env, font=self.font, scrollback=self.scrollback,
+                              confirm_multiline_paste=self.confirm_multiline_paste)
+        if self.scheme_for:
+            term.set_scheme(self.scheme_for(None))
+        title = f"ssh: {session.name}"
+        info = TabInfo(None, None, term, title)
+        info.ssh_session = session
+        self._infos[id(term)] = info
+        idx = self.tabs.addTab(term, icon(PROVIDER_ICONS["ssh"], dot=session.color), title)
+        self.tabs.setTabToolTip(idx, tooltip or session.destination)
+        if session.color:
+            self._color_tab_text(idx, session.color)
+        if autofill_factory is not None:
+            autofill = autofill_factory(term)
+            if autofill is not None:
+                term.output_observers.append(autofill.feed)
+                term.input_observers.append(autofill.user_typed)
+                info.autofill = autofill
+                info.autofill_factory = autofill_factory
         term.exited.connect(lambda code, t=term: self._on_exited(t, code))
         self.setCurrentWidget(self.tabs)
         self.tabs.setCurrentIndex(idx)
@@ -163,7 +226,7 @@ class TerminalTabs(QStackedWidget):
         info = self._infos.get(id(term))
         if idx < 0 or not info:
             return
-        self.tabs.setTabIcon(idx, _color_icon(None, exited=True))
+        self.tabs.setTabIcon(idx, self._tab_icon(info, exited=True))
         self.tabs.setTabText(idx, f"{info.title} (exited)")
         self.terminal_state_changed.emit()
 
@@ -230,12 +293,28 @@ class TerminalTabs(QStackedWidget):
             menu.addAction("Close other tabs", lambda: self._close_others(term))
         menu.exec(bar.mapToGlobal(pos))
 
+    @staticmethod
+    def _tab_icon(info: TabInfo, exited: bool = False) -> QIcon:
+        if info.ssh_session is not None:
+            from .icons import PROVIDER_ICONS, icon
+            return icon(PROVIDER_ICONS["ssh"], dot=None if exited else info.ssh_session.color,
+                        gray=exited)
+        return _color_icon(info.options.tab_color if info.options else None, exited=exited)
+
     def _restart(self, term: TerminalWidget):
         info = self._infos.get(id(term))
         idx = self._index_of(term)
         if info and idx >= 0:
             self.tabs.setTabText(idx, info.title)
-            self.tabs.setTabIcon(idx, _color_icon(info.options.tab_color if info.options else None))
+            self.tabs.setTabIcon(idx, self._tab_icon(info))
+        if info and info.autofill is not None and info.autofill_factory is not None:
+            # A reconnect may fill the saved password again, once.
+            term.output_observers.remove(info.autofill.feed)
+            term.input_observers.remove(info.autofill.user_typed)
+            info.autofill = info.autofill_factory(term)
+            if info.autofill is not None:
+                term.output_observers.append(info.autofill.feed)
+                term.input_observers.append(info.autofill.user_typed)
         term.restart()
         self.terminal_state_changed.emit()
 

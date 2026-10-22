@@ -34,8 +34,11 @@ from typing import Callable, Iterable, Iterator
 
 from configupdater import ConfigUpdater
 
+from .fileutil import replace_file
+
 GROUP_KEY = "x_group"
 COLOR_KEY = "x_color"
+SCHEME_KEY = "x_term_scheme"
 META_SECTION = "x-termswitch"
 LEGACY_META_SECTIONS = ("x-switchyard", "x-profile-launcher")
 META_GROUPS_KEY = "groups"
@@ -251,6 +254,12 @@ class Profile:
     @property
     def color(self) -> str | None:
         value = (self.props.get(COLOR_KEY) or "").strip()
+        return value or None
+
+    @property
+    def term_scheme(self) -> str | None:
+        """Terminal color scheme chosen for this profile, if any."""
+        value = (self.props.get(SCHEME_KEY) or "").strip()
         return value or None
 
     @property
@@ -490,6 +499,17 @@ class ProfileStore:
             self._write_meta_groups(u, remaining)
 
         self._edit(edit)
+
+    def set_profile_scheme(self, name: str, scheme: str | None) -> None:
+        """Pick a terminal color scheme for a profile; None uses the default."""
+        if scheme is not None and (_CONTROL_CHARS.search(scheme) or len(scheme) > 48
+                                   or scheme != scheme.strip() or not scheme):
+            raise ConfigError("Invalid color scheme name.")
+
+        def edit(u: ConfigUpdater) -> None:
+            _set_option(self._ensure_profile_section(u, name), SCHEME_KEY, scheme)
+
+        self._edit(edit, f"Set terminal colors for {name}")
 
     def set_profile_color(self, name: str, color: str | None) -> None:
         def edit(u: ConfigUpdater) -> None:
@@ -731,7 +751,7 @@ class ProfileStore:
         self._write_target()
         stamp = time.strftime("%Y%m%d-%H%M%S")
         dest = self.config_file.with_name(f"{self.config_file.name}.termswitch-reset-{stamp}.bak")
-        os.replace(self.config_file, dest)
+        replace_file(self.config_file, dest)
         self._save_undo(dest.read_text(encoding="utf-8"), "Reset config")
         self._undo_expected = ""
         self.load()
@@ -745,6 +765,15 @@ class ProfileStore:
 
     def can_undo(self) -> bool:
         return self.undo_label is not None and self.undo_file.is_file()
+
+    def undo_blocked(self) -> str | None:
+        """Why the last change can't be undone safely, or None."""
+        if not self.can_undo():
+            return "There is nothing to undo."
+        if _read_text(self.config_file) != self._undo_expected:
+            return ("The config changed outside termSwitch after that change, so it can't "
+                    "be undone safely. Use File > Backups instead.")
+        return None
 
     def undo(self) -> str:
         """Put back the config as it was before the last change. Undoing again
@@ -870,7 +899,7 @@ class ProfileStore:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 fh.write(original)
-            os.replace(tmp, path)
+            replace_file(tmp, path)
         except BaseException:
             try:
                 os.unlink(tmp)
@@ -920,7 +949,7 @@ class ProfileStore:
     def _atomic_write(self, text: str) -> None:
         target = self._write_target()
         _ensure_private_dir(target.parent)
-        # mkstemp creates the file 0600 in the same directory, so os.replace is atomic.
+        # mkstemp creates the file 0600 in the same directory, so the replace is atomic.
         fd, tmp = tempfile.mkstemp(prefix=".config-", dir=target.parent)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -929,7 +958,7 @@ class ProfileStore:
                 os.fsync(fh.fileno())
             if target.exists():
                 shutil.copymode(target, tmp)
-            os.replace(tmp, target)
+            replace_file(tmp, target)
         except BaseException:
             try:
                 os.unlink(tmp)

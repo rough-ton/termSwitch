@@ -15,43 +15,38 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QSettings, Signal
 
+from .fileutil import replace_file
+
 SETTINGS_KEY = "favorite_commands"
 DEFAULTS_ADDED_KEY = "favorite_commands_defaults_added"
 
-# Starter favorites, from "Top 20 AWS CLI Commands Every DevOps Engineer Should Know"
-# (Cloud Native Chronicles): every distinct command in the article, in its order.
-# Bare `aws configure` is left out because favorites are "service command" pairs.
+DEFAULTS_VERSION_KEY = "favorite_commands_defaults_version"
+DEFAULTS_VERSION = 2
+
+# Starter favorites: five everyday AWS CLI commands. Who am I, what's running,
+# what's in my buckets, copy files, and what are my logs saying.
 DEFAULT_FAVORITES = (
     "sts get-caller-identity",
-    "ec2 describe-instances",
-    "ec2 start-instances",
-    "ec2 stop-instances",
-    "ec2 create-snapshot",
     "s3 ls",
     "s3 cp",
-    "s3 sync",
-    "iam list-users",
-    "iam list-roles",
-    "iam list-policies",
-    "iam list-groups",
-    "iam attach-user-policy",
-    "iam attach-group-policy",
-    "iam attach-role-policy",
-    "lambda list-functions",
-    "lambda invoke",
-    "cloudformation validate-template",
-    "cloudformation deploy",
-    "ecr get-login-password",
-    "ecs list-clusters",
-    "eks list-clusters",
-    "eks describe-cluster",
-    "ecs describe-clusters",
-    "logs describe-log-groups",
-    "logs filter-log-events",
-    "autoscaling describe-auto-scaling-groups",
-    "elbv2 describe-load-balancers",
-    "rds describe-db-instances",
-    "cloudwatch get-metric-data",
+    "ec2 describe-instances",
+    "logs tail",
+)
+
+# The first set of starter favorites (version 1), taken from every command in "Top 20
+# AWS CLI Commands Every DevOps Engineer Should Know". Kept to slim down untouched
+# lists on upgrade.
+PREVIOUS_DEFAULTS = (
+    "sts get-caller-identity", "ec2 describe-instances", "ec2 start-instances",
+    "ec2 stop-instances", "ec2 create-snapshot", "s3 ls", "s3 cp", "s3 sync",
+    "iam list-users", "iam list-roles", "iam list-policies", "iam list-groups",
+    "iam attach-user-policy", "iam attach-group-policy", "iam attach-role-policy",
+    "lambda list-functions", "lambda invoke", "cloudformation validate-template",
+    "cloudformation deploy", "ecr get-login-password", "ecs list-clusters",
+    "eks list-clusters", "eks describe-cluster", "ecs describe-clusters",
+    "logs describe-log-groups", "logs filter-log-events",
+    "autoscaling describe-auto-scaling-groups", "elbv2 describe-load-balancers",
+    "rds describe-db-instances", "cloudwatch get-metric-data",
 )
 FILE_FORMAT = "termswitch-favorites"
 FILE_VERSION = 1
@@ -89,7 +84,11 @@ class Favorites(QObject):
         # removing them, or all favorites, never brings them back on restart.
         if self.defaults and not self.settings.value(DEFAULTS_ADDED_KEY, False, type=bool):
             self.settings.setValue(DEFAULTS_ADDED_KEY, True)
+            self.settings.setValue(DEFAULTS_VERSION_KEY, DEFAULTS_VERSION)
             self.add_defaults()
+        elif self.defaults and self.settings.value(DEFAULTS_VERSION_KEY, 1, type=int) < DEFAULTS_VERSION:
+            self.settings.setValue(DEFAULTS_VERSION_KEY, DEFAULTS_VERSION)
+            self._slim_previous_defaults()
 
     # ---- queries ---------------------------------------------------------
 
@@ -139,6 +138,20 @@ class Favorites(QObject):
             self.settings.sync()
         return added
 
+    def _slim_previous_defaults(self) -> None:
+        """Upgrade from the 30 first-version starters to the current five, but only
+        when all 30 are still there, so a list the user has edited is never
+        touched. Favorites the user added themselves are always kept."""
+        if not set(PREVIOUS_DEFAULTS) <= set(self._items):
+            self.settings.sync()
+            return
+        drop = set(PREVIOUS_DEFAULTS) - set(self.defaults)
+        self._items = [k for k in self._items if k not in drop]
+        for key in self.defaults:
+            if key not in self._items:
+                self._items.append(key)
+        self._save()
+
     def missing_defaults(self) -> int:
         return sum(1 for key in self.defaults if key not in self._items)
 
@@ -158,7 +171,7 @@ class Favorites(QObject):
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 fh.write(text)
-            os.replace(tmp, path)
+            replace_file(tmp, path)
         except BaseException:
             try:
                 os.unlink(tmp)

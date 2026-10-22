@@ -51,6 +51,10 @@ if sys.platform.startswith("win"):
     PACKAGES["pywinpty"] = "2.0.14"     # ConPTY for embedded terminals
 else:
     PACKAGES["ptyprocess"] = "0.7.0"
+if sys.platform == "darwin" or sys.platform.startswith("win"):
+    PACKAGES["keyring"] = "25.0.0"      # saved SSH passwords in Keychain / Credential Manager
+# OpenSSH 7.3 added -J (jump hosts); CertificateFile came in 7.2.
+MIN_OPENSSH = "7.3"
 # AWS CLI 2.9 added sso-session support and 'configure export-credentials'.
 MIN_AWS_CLI = "2.9.0"
 
@@ -64,7 +68,7 @@ FROZEN = bool(getattr(sys, "frozen", False))  # running from the packaged app
 # package metadata is not bundled.
 _VERSION_MODULES = {"PySide6-Essentials": "PySide6", "shiboken6": "shiboken6",
                     "configupdater": "configupdater", "ptyprocess": "ptyprocess",
-                    "pywinpty": "winpty"}
+                    "pywinpty": "winpty", "keyring": "keyring"}
 
 
 @dataclass
@@ -414,11 +418,55 @@ def run_checks(online: bool = True, store: ProfileStore | None = None) -> list[C
     checks.append(check_aws_cli(latest.get("aws-cli"), online))
     checks += check_terminals()
     checks += check_config_files(store)
+    checks += check_ssh()
     checks += check_environment()
     if online and not any(v for k, v in latest.items() if k != "termswitch"):
         checks.append(Check("Update check", INFO, "offline",
                             "Could not reach pypi.org or GitHub. Version minimums were "
                             "still checked locally."))
+    return checks
+
+
+def check_ssh(session_store=None) -> list[Check]:
+    """The OpenSSH client for SSH sessions (optional), and private key permissions."""
+    from .launcher import find_ssh
+    from .ssh_sessions import SessionStore, key_file_problem
+    checks: list[Check] = []
+    ssh = find_ssh()
+    if not ssh:
+        hint = ("Settings > Apps > Optional features > add OpenSSH Client"
+                if sys.platform.startswith("win") else "Install the OpenSSH client")
+        checks.append(Check("OpenSSH client", INFO, "not found",
+                            "SSH sessions need the ssh command. AWS profiles work without it.",
+                            hint))
+    else:
+        try:
+            proc = subprocess.run([ssh, "-V"], capture_output=True, text=True, timeout=10,
+                                  stdin=subprocess.DEVNULL, **_no_window())
+            out = (proc.stderr + proc.stdout).strip()
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            out = str(exc)
+        m = re.search(r"OpenSSH_(?:for_Windows_)?(\d+\.\d+)", out)
+        version = m.group(1) if m else ""
+        found = f"{version or 'unknown'} ({ssh})"
+        if version and parse_version(version) < parse_version(MIN_OPENSSH):
+            checks.append(Check("OpenSSH client", WARN, found,
+                                f"OpenSSH {MIN_OPENSSH} or newer is needed for jump hosts.",
+                                "Update the OpenSSH client"))
+        else:
+            checks.append(Check("OpenSSH client", OK, found,
+                                "Found." if version else f"Unrecognized version: {out[:120]}"))
+    try:
+        store = session_store or SessionStore()
+        store.load()
+        keys = {s.key_file for s in store.all() if s.key_file}
+    except Exception:
+        keys = set()
+    for key in sorted(keys):
+        problem = key_file_problem(key)
+        if problem and "other users" in problem:
+            checks.append(Check("SSH key permissions", WARN, key, problem,
+                                f"chmod 600 {key}"))
     return checks
 
 

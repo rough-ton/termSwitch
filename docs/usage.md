@@ -7,6 +7,7 @@
 - [Profiles and groups](#profiles-and-groups)
 - [Managing profiles](#managing-profiles)
 - [Managing the config file](#managing-the-config-file)
+- [SSH sessions](#ssh-sessions)
 - [Terminal tabs](#terminal-tabs)
 - [Commands pane](#commands-pane)
 - [Favorite commands](#favorite-commands)
@@ -14,6 +15,7 @@
 - [Run safety](#run-safety)
 - [Collapsing the Commands pane](#collapsing-the-commands-pane)
 - [Credential status and SSO](#credential-status-and-sso)
+- [Themes and terminal colors](#themes-and-terminal-colors)
 - [About termSwitch](#about-termswitch)
 
 ## The main window
@@ -47,6 +49,11 @@ If the AWS CLI isn't installed, the panel says so and links to the dependency ch
 ## Profiles and groups
 
 ![Profiles grouped in the tree](images/profile-groups.png)
+
+Each AWS profile shows an orange cloud marked "AWS", with a dot in the top-right corner
+for its credential status: grey for not checked, green for signed in, orange for expired or
+not logged in, and red for an error. SSH sessions, when they arrive, will use a teal
+terminal icon.
 
 | Action | How |
 | --- | --- |
@@ -138,9 +145,12 @@ duplicated.
 **Production profiles** (matching the production pattern in Settings) need a second
 confirmation to rename or delete: type the profile name.
 
-**Undo** reverses the last change to the config, including deletes, renames, restores
-and resets. Undoing again redoes it. If the file was changed outside termSwitch since,
-undo is refused; use **File > Backups** instead.
+**Undo** reverses the last change to the config or your SSH sessions, including
+deletes, renames, moves, restores and resets. A change that touched both, such as
+renaming a folder with AWS profiles and SSH sessions in it, is undone in one step.
+Undoing again redoes it. If either file was changed outside termSwitch since, undo is
+refused; use **File > Backups** for the AWS config. Undoing an SSH session delete
+brings the session back, but not a saved password.
 
 ## Managing the config file
 
@@ -161,6 +171,48 @@ The **File** menu has tools for the whole config:
 - **Reset config:** moves the config aside as a backup and shows the welcome panel. The
   old file is kept, and can be restored from Backups or with Undo. A symlinked config
   (for example from a dotfiles repo) is never reset.
+
+## SSH sessions
+
+termSwitch can also open saved SSH connections in terminal tabs. They're listed in the
+tree under **SSH sessions**, with a teal terminal icon.
+
+- **Where sessions come from:**
+  - Sessions you create in termSwitch (Profiles > **New SSH session**, or right-click a
+    folder > **New SSH session here**).
+  - The `Host` entries in `~/.ssh/config`. Wildcard entries are skipped and `Include`
+    files are followed. termSwitch never changes that file; connecting runs
+    `ssh <alias>`, so all your settings there apply. Use **Duplicate** to turn one into
+    an editable termSwitch session.
+- **Folders are shared with AWS profiles.** A Prod folder can hold your prod AWS
+  profiles and your prod SSH sessions side by side. Drag an SSH session onto a folder,
+  or pick the folder in the session editor. Hosts from `~/.ssh/config` can be dragged
+  into folders too; termSwitch remembers where you put them in its own sessions file.
+  Sessions in no folder are listed under **SSH sessions**, and `~/.ssh/config` hosts
+  you haven't placed under **SSH sessions > ~/.ssh/config**. Renaming, moving or
+  deleting a folder carries its SSH sessions along, and **Open all** on a folder opens
+  its AWS profiles and SSH sessions together.
+- **Connecting:** double-click, Enter, or right-click > **Connect**. termSwitch runs your
+  system's OpenSSH client (`ssh`), so host key checks, `known_hosts`, agents and
+  `~/.ssh/config` work exactly as they do in any terminal. The first time you connect to
+  a host, ssh shows the host's fingerprint in the tab for you to confirm.
+- **Sign-in methods:**
+  - **SSH agent or ~/.ssh defaults:** whatever keys ssh finds on its own.
+  - **Key file:** a specific private key, with an optional certificate
+    (`-cert.pub`). If the key has a passphrase, ssh asks for it in the tab.
+  - **Password:** asked for in the tab every time, by default.
+- **Remembering a password** (optional): check **Remember the password** in the session
+  editor. The password is stored only in the macOS Keychain or the Windows Credential
+  Manager, never in termSwitch's files. When you connect, termSwitch types it once at
+  ssh's own password prompt for that user and host. **Forget saved password** (right-
+  click) or unchecking the box removes it, and deleting a session removes it too.
+- **Other options:** port, user, jump host (`-J`), keepalive, and agent forwarding (only
+  for hosts you trust).
+- **Copy ssh command** puts the exact command on the clipboard, to run it elsewhere.
+
+On Linux, and anywhere the system password store isn't available, the remember option
+is turned off and ssh asks for the password in the tab. On macOS, an unsigned build may
+ask for permission to read the saved password after an update.
 
 ## Terminal tabs
 
@@ -247,33 +299,16 @@ Star the commands you use most so they're one click away.
   - With **All** selected and the Name filter empty, a **Favorites** section appears
     above the A-Z list.
   - Favorites show a star wherever they appear.
-- **Starter favorites:** on first run, termSwitch adds 30 commonly used commands,
-  taken from every command in
-  [Top 20 AWS CLI Commands Every DevOps Engineer Should Know](https://medium.com/cloud-native-chronicles/top-20-aws-cli-commands-every-devops-engineer-should-know-37fd68898a29).
-  They're added once and are yours to remove. If you already have favorites, the
-  starters are added after them. To add back any you removed, right-click in the
-  Favorites view > **Restore default favorites**; your own favorites are kept.
+- **Starter favorites:** on first run, termSwitch adds five everyday commands:
+  `sts get-caller-identity`, `s3 ls`, `s3 cp`, `ec2 describe-instances` and
+  `logs tail`. They're added once and are yours to remove. If you already have
+  favorites, the starters are added after them. To add back any you removed,
+  right-click in the Favorites view > **Restore default favorites**; your own
+  favorites are kept.
 
-  <details>
-  <summary>The starter favorites</summary>
-
-  | Area | Commands |
-  | --- | --- |
-  | Identity | `sts get-caller-identity` |
-  | EC2 | `ec2 describe-instances`, `ec2 start-instances`, `ec2 stop-instances`, `ec2 create-snapshot` |
-  | S3 | `s3 ls`, `s3 cp`, `s3 sync` |
-  | IAM | `iam list-users`, `iam list-roles`, `iam list-policies`, `iam list-groups`, `iam attach-user-policy`, `iam attach-group-policy`, `iam attach-role-policy` |
-  | Lambda | `lambda list-functions`, `lambda invoke` |
-  | CloudFormation | `cloudformation validate-template`, `cloudformation deploy` |
-  | Containers | `ecr get-login-password`, `ecs list-clusters`, `ecs describe-clusters`, `eks list-clusters`, `eks describe-cluster` |
-  | Logs and metrics | `logs describe-log-groups`, `logs filter-log-events`, `cloudwatch get-metric-data` |
-  | Scaling and load balancing | `autoscaling describe-auto-scaling-groups`, `elbv2 describe-load-balancers` |
-  | RDS | `rds describe-db-instances` |
-
-  The article's `aws configure` isn't included, because favorites are service and
-  command pairs.
-
-  </details>
+  Earlier versions added 30 starters. If you never changed that list, upgrading
+  trims it to the five above and keeps any favorites you added yourself. If you
+  did change it, it's left as it is.
 - **Storage:** favorites are saved in termSwitch's own settings, never in
   `~/.aws/config`.
 - **After an AWS CLI upgrade:** a favorite the installed CLI no longer has stays in the
@@ -368,6 +403,32 @@ version:
   on that SSO session.
 - **Production safeguards.** Profiles that match a pattern (`prod` by default) show in
   red and get a red tab color. By default, termSwitch asks before opening one.
+
+## Themes and terminal colors
+
+Settings has the appearance options:
+
+- **Theme:** Follow system (the default), Light or Dark. termSwitch looks the same on
+  Windows and macOS in each. With Follow system, it switches when the OS does, without
+  a restart.
+- **Terminal colors:** the color scheme for terminal tabs.
+  - **Match the app theme** (the default) uses the built-in Light scheme with the light
+    theme, and Dark with the dark theme.
+  - Or pick one scheme for every tab: Dark, Light, High contrast, or one you imported.
+  - **Import...** reads a Windows Terminal color scheme (`.json`, a single scheme or a
+    whole `settings.json`) or an iTerm2 `.itermcolors` file. Imported schemes are saved
+    in termSwitch's data folder.
+- **Terminal font:** the font family and size for terminal tabs.
+
+To give one profile its own colors, right-click it > **Terminal colors** and pick a
+scheme, for example High contrast for production. **Default** goes back to the setting
+above. The choice is saved in `~/.aws/config` as `x_term_scheme`, next to `x_group`.
+
+Changes apply to open tabs right away; the shells keep running.
+
+Meaningful colors keep their meaning in both themes: production profiles are red,
+status dots are grey, green, orange and red, and errors in forms are red. Each theme
+uses shades chosen to stay readable on its own background.
 
 ## About termSwitch
 

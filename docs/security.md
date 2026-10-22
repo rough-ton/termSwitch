@@ -84,6 +84,51 @@ does to protect them, and what it can't protect against. To report a vulnerabili
 - Choosing another config file sets `AWS_CONFIG_FILE` for termSwitch's own status
   checks and new tabs. An `AWS_CONFIG_FILE` already set in your environment wins.
 
+## SSH sessions
+
+- **The client:** sessions run the system OpenSSH client, found with the same safe
+  lookup as other programs (no current directory or relative PATH entries). Host key
+  checking is never weakened: ssh's own prompts stay in the tab.
+- **The command:** every value is a separate argument, and `--` ends the options before
+  the host, so nothing in a session can be read as an ssh option. Hosts, users, ports,
+  jump hosts and key paths are validated, and can't start with `-`.
+- **Options:** only a short list is allowed (keepalives, timeouts, compression, agent
+  forwarding, `IdentitiesOnly`, `AddKeysToAgent`). Options that run commands or weaken
+  host checks, such as `ProxyCommand`, `LocalCommand`, `StrictHostKeyChecking` and
+  `UserKnownHostsFile`, are refused.
+- **The sessions file** (`ssh_sessions.json` in termSwitch's data folder) is created
+  mode 0600 in a 0700 folder, must be a regular file owned by you, and is replaced
+  atomically. It holds key and certificate paths, never keys or passwords. Entries
+  that fail validation are skipped.
+- **`~/.ssh/config`** is read, never written. Only `Include` files inside your home
+  folder are followed. The folders you place its hosts in are remembered in the
+  sessions file.
+- **Changes to both files** (for example renaming a folder that has AWS profiles and SSH
+  sessions) write the sessions file first, then the AWS config; if the config write
+  fails, the sessions file is put back. Undo reverses both, and is refused if either
+  file changed outside termSwitch since.
+- **Saved passwords:**
+  - Stored only in the macOS Keychain or Windows Credential Manager, through `keyring`.
+    termSwitch refuses any other keyring backend (for example plain-text ones), so on
+    other systems the option is off.
+  - Read from the store only when ssh shows its password prompt, and never cached.
+  - Typed into the tab's terminal input, where ssh has echo turned off. Never put in
+    command arguments, environment variables, files or logs.
+  - Typed at most once per connection, only when the prompt names the session's user and
+    host exactly, only in the first minute, and never after you've typed anything. Jump
+    host prompts, key passphrases and host key questions are never answered for you.
+- **Private keys:** the session editor, the details pane and the dependency check warn
+  when a key file can be read by other users.
+
+## Imported color schemes
+
+- Windows Terminal and iTerm2 color files are read as data only (JSON, or an XML
+  property list), and are limited to 512 KB.
+- iTerm2 files with their own document type definitions or entities are refused before
+  parsing.
+- Every color must be `#RRGGBB`, a scheme needs exactly 16 ANSI colors, and names are
+  limited to letters, digits and simple punctuation.
+
 ## Supply chain
 
 - The dependencies are kept small:

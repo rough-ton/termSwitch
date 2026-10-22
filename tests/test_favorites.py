@@ -265,36 +265,46 @@ def test_ctrl_d_reaches_terminal_but_toggles_in_pane(qapp, data_dir, tmp_path):
 
 def test_defaults_are_valid_unique_cli_names():
     from termswitch.aws_commands import CUSTOM_COMMANDS, cli_operation_name
-    from termswitch.favorites import DEFAULT_FAVORITES, is_valid_key
-    assert len(DEFAULT_FAVORITES) == len(set(DEFAULT_FAVORITES)) == 30
-    assert all(is_valid_key(k) for k in DEFAULT_FAVORITES)
+    from termswitch.favorites import DEFAULT_FAVORITES, PREVIOUS_DEFAULTS, is_valid_key
+    assert DEFAULT_FAVORITES == ("sts get-caller-identity", "s3 ls", "s3 cp",
+                                 "ec2 describe-instances", "logs tail")
+    assert len(PREVIOUS_DEFAULTS) == len(set(PREVIOUS_DEFAULTS)) == 30
+    assert all(is_valid_key(k) for k in DEFAULT_FAVORITES + PREVIOUS_DEFAULTS)
     # Model operations: the API name must turn into exactly this CLI name.
-    api = {
-        "sts get-caller-identity": "GetCallerIdentity",
-        "ec2 describe-instances": "DescribeInstances", "ec2 start-instances": "StartInstances",
-        "ec2 stop-instances": "StopInstances", "ec2 create-snapshot": "CreateSnapshot",
-        "iam list-users": "ListUsers", "iam list-roles": "ListRoles",
-        "iam list-policies": "ListPolicies", "iam list-groups": "ListGroups",
-        "iam attach-user-policy": "AttachUserPolicy",
-        "iam attach-group-policy": "AttachGroupPolicy",
-        "iam attach-role-policy": "AttachRolePolicy",
-        "lambda list-functions": "ListFunctions", "lambda invoke": "Invoke",
-        "cloudformation validate-template": "ValidateTemplate",
-        "ecs list-clusters": "ListClusters", "eks list-clusters": "ListClusters",
-        "eks describe-cluster": "DescribeCluster", "ecs describe-clusters": "DescribeClusters",
-        "logs describe-log-groups": "DescribeLogGroups",
-        "logs filter-log-events": "FilterLogEvents",
-        "autoscaling describe-auto-scaling-groups": "DescribeAutoScalingGroups",
-        "elbv2 describe-load-balancers": "DescribeLoadBalancers",
-        "rds describe-db-instances": "DescribeDBInstances",
-        "cloudwatch get-metric-data": "GetMetricData",
-    }
+    api = {"sts get-caller-identity": "GetCallerIdentity",
+           "ec2 describe-instances": "DescribeInstances"}
     for key in DEFAULT_FAVORITES:
         service, name = key.split(" ")
         if key in api:
             assert cli_operation_name(api[key]) == name, key
-        else:   # high-level commands the CLI adds itself
+        else:   # high-level commands the CLI adds itself (s3 ls, s3 cp, logs tail)
             assert name in CUSTOM_COMMANDS[service][1], key
+
+
+def test_upgrade_slims_an_untouched_starter_list(qapp, tmp_path):
+    from termswitch.favorites import (DEFAULT_FAVORITES, DEFAULTS_ADDED_KEY,
+                                      DEFAULTS_VERSION_KEY, PREVIOUS_DEFAULTS,
+                                      SETTINGS_KEY, Favorites)
+    s = settings_at(tmp_path, fresh=True)
+    s.setValue(DEFAULTS_ADDED_KEY, True)                     # seeded by version 1
+    s.setValue(SETTINGS_KEY, ["route53 list-hosted-zones", *PREVIOUS_DEFAULTS])
+    fav = Favorites(s, defaults=DEFAULT_FAVORITES)
+    assert fav.items()[0] == "route53 list-hosted-zones"    # the user's own stays
+    assert set(fav.items()) == {"route53 list-hosted-zones", *DEFAULT_FAVORITES}
+    assert s.value(DEFAULTS_VERSION_KEY, type=int) == 2
+    fav.remove("s3 ls")
+    again = Favorites(s, defaults=DEFAULT_FAVORITES)         # runs only once
+    assert "s3 ls" not in again
+
+
+def test_upgrade_leaves_an_edited_list_alone(qapp, tmp_path):
+    from termswitch.favorites import (DEFAULT_FAVORITES, DEFAULTS_ADDED_KEY,
+                                      PREVIOUS_DEFAULTS, SETTINGS_KEY, Favorites)
+    s = settings_at(tmp_path, fresh=True)
+    s.setValue(DEFAULTS_ADDED_KEY, True)
+    edited = [k for k in PREVIOUS_DEFAULTS if k != "iam list-users"]
+    s.setValue(SETTINGS_KEY, edited)
+    assert Favorites(s, defaults=DEFAULT_FAVORITES).items() == edited
 
 
 def test_defaults_added_once_on_first_run(qapp, tmp_path):
@@ -316,13 +326,13 @@ def test_defaults_merge_with_existing_favorites(qapp, tmp_path):
     fav = Favorites(s, defaults=DEFAULT_FAVORITES)
     items = fav.items()
     assert items[:2] == ["route53 list-hosted-zones", "s3 ls"]   # user's own stay first
-    assert set(DEFAULT_FAVORITES) <= set(items) and len(items) == 31
+    assert set(DEFAULT_FAVORITES) <= set(items) and len(items) == 6
 
 
 def test_restore_default_favorites(qapp, data_dir, tmp_path):
     from termswitch.commands_pane import FAVORITES
     pane = make_pane(qapp, data_dir, settings_at(tmp_path, fresh=True))
-    assert pane.service.itemText(pane.service.findData(FAVORITES)) == "Favorites (30)"
+    assert pane.service.itemText(pane.service.findData(FAVORITES)) == "Favorites (5)"
     pane.favorites.remove("sts get-caller-identity")
     pane.favorites.remove("s3 cp")
     pane.favorites.add("route53 list-hosted-zones")

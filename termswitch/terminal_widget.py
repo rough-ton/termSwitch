@@ -14,8 +14,8 @@ from PySide6.QtGui import (QColor, QFont, QFontDatabase, QFontMetricsF, QGuiAppl
 from PySide6.QtWidgets import QAbstractScrollArea, QMenu, QMessageBox
 
 from .pty_backend import PtyError, PtyProcess
-from .terminal_core import (CURSOR_COLOR, DEFAULT_BG, DEFAULT_FG, SELECTION_BG,
-                            TerminalScreen, encode_key, paste_line_count, resolve_color,
+from .term_schemes import BUILTIN, DEFAULT_DARK, ColorScheme
+from .terminal_core import (TerminalScreen, encode_key, paste_line_count,
                             sanitize_paste)
 
 IS_MAC = sys.platform == "darwin"
@@ -73,9 +73,14 @@ class TerminalWidget(QAbstractScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
         self.viewport().setAutoFillBackground(False)
-        self.setStyleSheet(f"QAbstractScrollArea {{ background: {DEFAULT_BG}; border: none; }}")
+        self.scheme: ColorScheme = BUILTIN[DEFAULT_DARK]
+        self._apply_scheme_style()
 
         self._scrollback_size = scrollback
+        # Hooks used by SSH password filling: output_observers get each batch of
+        # output text; input_observers are told when the user sends input.
+        self.output_observers: list = []
+        self.input_observers: list = []
         self.screen = TerminalScreen(80, 24, history=scrollback, reply=self._reply,
                                      on_title=lambda t: self.title_changed.emit(t))
         self.stream = pyte.Stream(self.screen)
@@ -172,7 +177,11 @@ class TerminalWidget(QAbstractScrollArea):
             more = bool(self._pending)
         if chunks:
             before = len(self.screen.scrollback)
-            self.stream.feed("".join(chunks))
+            text = "".join(chunks)
+            self.stream.feed(text)
+            # After the screen is updated, so observers can read it.
+            for observe in list(self.output_observers):
+                observe(text)
             if self._scroll:
                 # Keep the view still while new output arrives.
                 self._scroll = min(self._scroll + len(self.screen.scrollback) - before,
@@ -202,8 +211,29 @@ class TerminalWidget(QAbstractScrollArea):
 
     def send_text(self, text: str) -> None:
         if self.pty and self.pty.is_alive():
+            for observe in list(self.input_observers):
+                observe()
             self.pty.write(text)
             self._scroll_to_bottom()
+
+    def text_before_cursor(self, max_rows: int = 4) -> tuple[str, int]:
+        """The screen text from up to ``max_rows`` rows above the cursor through the
+        cursor, rows joined without separators, plus the screen width. A line that
+        wrapped reads as one piece; each row starts at a multiple of the width."""
+        cols = self.screen.columns
+        y, x = self.screen.cursor.y, min(self.screen.cursor.x, cols)
+        rows = []
+        for r in range(max(0, y - max_rows + 1), y + 1):
+            line = self.screen.buffer[r]
+            width = cols if r < y else x
+            rows.append("".join((line[c].data or " ") for c in range(width)))
+        return "".join(rows), cols
+
+    def write_secret(self, text: str) -> None:
+        """Send text to the program without recording or echoing it on our side (used
+        to answer a password prompt). Not reported to input observers."""
+        if self.pty and self.pty.is_alive():
+            self.pty.write(text)
 
     def insert_command(self, command: str, run: bool = False) -> None:
         """Type a command at the prompt; press Enter only when run=True."""
@@ -213,6 +243,18 @@ class TerminalWidget(QAbstractScrollArea):
         self.send_text(safe + ("\r" if run else ""))
 
     # ---- font and geometry -----------------------------------------------
+
+    def set_scheme(self, scheme: ColorScheme) -> None:
+        """Change colors in place; the shell keeps running."""
+        if scheme == self.scheme:
+            return
+        self.scheme = scheme
+        self._apply_scheme_style()
+        self.viewport().update()
+
+    def _apply_scheme_style(self) -> None:
+        self.setStyleSheet(
+            f"QAbstractScrollArea {{ background: {self.scheme.background}; border: none; }}")
 
     def set_font(self, font: QFont) -> None:
         self._font = QFont(font)
@@ -329,7 +371,11 @@ class TerminalWidget(QAbstractScrollArea):
 
     def paintEvent(self, event):
         p = QPainter(self.viewport())
-        p.fillRect(self.viewport().rect(), QColor(DEFAULT_BG))
+        s = self.scheme
+        default_fg, default_bg = s.foreground, s.background
+        cursor_color, selection_bg = s.cursor, s.selection
+        resolve = s.resolve
+        p.fillRect(self.viewport().rect(), QColor(default_bg))
         screen = self.screen
         cols = screen.columns
         cw, ch, asc = self._cw, self._ch, self._ascent
@@ -341,13 +387,13 @@ class TerminalWidget(QAbstractScrollArea):
             col = 0
             while col < cols:
                 char = line[col]
-                fg = resolve_color(char.fg, DEFAULT_FG)
-                bg = resolve_color(char.bg, DEFAULT_BG)
+                fg = resolve(char.fg, default_fg)
+                bg = resolve(char.bg, default_bg)
                 if char.reverse != reverse_screen:
                     fg, bg = bg, fg
                 selected = self._is_selected(abs_idx, col, sel)
                 if selected:
-                    bg = SELECTION_BG
+                    bg = selection_bg
                 style = (fg, bg, char.bold, char.italics, char.underscore,
                          char.strikethrough, selected)
                 # Group a run of cells with the same style and single-width text.
@@ -358,13 +404,13 @@ class TerminalWidget(QAbstractScrollArea):
                 if not wide:
                     while col < cols:
                         nxt = line[col]
-                        nfg = resolve_color(nxt.fg, DEFAULT_FG)
-                        nbg = resolve_color(nxt.bg, DEFAULT_BG)
+                        nfg = resolve(nxt.fg, default_fg)
+                        nbg = resolve(nxt.bg, default_bg)
                         if nxt.reverse != reverse_screen:
                             nfg, nbg = nbg, nfg
                         nsel = self._is_selected(abs_idx, col, sel)
                         if nsel:
-                            nbg = SELECTION_BG
+                            nbg = selection_bg
                         nstyle = (nfg, nbg, nxt.bold, nxt.italics, nxt.underscore,
                                   nxt.strikethrough, nsel)
                         if nstyle != style or (col + 1 < cols and line[col + 1].data == ""):
@@ -375,7 +421,7 @@ class TerminalWidget(QAbstractScrollArea):
                         col += 1
                 width_cells = col - start
                 rect = QRectF(start * cw, y, width_cells * cw, ch)
-                if bg != DEFAULT_BG:
+                if bg != default_bg:
                     p.fillRect(rect, QColor(bg))
                 run = "".join(text)
                 if run.strip():
@@ -399,15 +445,15 @@ class TerminalWidget(QAbstractScrollArea):
             if cx < cols and cy < screen.lines:
                 rect = QRectF(cx * cw, cy * ch, cw, ch)
                 if self.hasFocus():
-                    p.fillRect(rect, QColor(CURSOR_COLOR))
+                    p.fillRect(rect, QColor(cursor_color))
                     ch_data = screen.buffer[cy][cx].data
                     if ch_data.strip():
                         p.setFont(self._font)
-                        p.setPen(QColor(DEFAULT_BG))
+                        p.setPen(QColor(default_bg))
                         p.drawText(rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
                                    ch_data)
                 else:
-                    p.setPen(QPen(QColor(CURSOR_COLOR), 1))
+                    p.setPen(QPen(QColor(cursor_color), 1))
                     p.drawRect(rect.adjusted(0.5, 0.5, -0.5, -0.5))
         p.end()
 
