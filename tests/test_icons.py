@@ -26,3 +26,84 @@ def test_license_and_notice_are_present():
     assert "MIT" in (MATERIAL / "LICENSE").read_text()
     notice = (ROOT / "THIRD_PARTY_NOTICES.md").read_text()
     assert "Material Icon Theme" in notice and "Permission is hereby granted" in notice
+
+
+def test_every_mapped_icon_is_bundled_and_every_bundled_icon_is_used(qapp):
+    import re
+
+    from termswitch import icons
+    mapped = ({n for _p, n in icons.TEXT_ICONS} | set(icons.PROFILE_KIND_ICONS.values())
+              | set(icons.SERVICE_ICONS.values()) | set(icons.AUTO_GROUP_ICONS.values()))
+    for name in mapped:
+        assert (MATERIAL / f"{name}.svg").is_file(), name
+        assert not icons.icon(name).pixmap(32, 32).isNull(), name
+    # Icons referenced directly in code count as used too.
+    code = "\n".join(p.read_text() for p in (ROOT / "termswitch").glob("*.py"))
+    direct = set(re.findall(r'(?:material_icon|icon)\("([a-z0-9-]+)"', code))
+    direct |= {"console", "powershell", "markdown", "license"}
+    bundled = {p.stem for p in MATERIAL.glob("*.svg")}
+    assert bundled <= mapped | direct, sorted(bundled - mapped - direct)
+
+
+def test_bundled_svgs_are_plain_artwork():
+    for svg in MATERIAL.glob("*.svg"):
+        text = svg.read_text()
+        assert "<script" not in text and "http://" not in text.replace(
+            "http://www.w3.org", ""), svg.name
+
+
+def test_icon_for_text():
+    from termswitch.icons import icon_for_text
+    cases = {
+        "Reload": "folder-update", "&Settings": "settings", "New profile...": "key",
+        "Open 3 terminals": "console", "Open all 12 terminals": "console",
+        "Open in external terminal": "command", "Check status of group": "verified",
+        "Delete 2 profiles...": "folder-trash", "Undo Delete profile ops": "folder-backup",
+        "Duplicate tab": "console", "Duplicate...": "template",
+        "Edit config file...": "editorconfig", "Edit...": "settings",
+        "Restore default favorites (2)": "folder-backup", "Report an issue": "folder-debug",
+        "Licenses...": "license", "Run": "console", "Docs": "readme",
+    }
+    for text, name in cases.items():
+        assert icon_for_text(text) == name, text
+    for text in ("Close", "Cancel", "OK", "Copy", "Quit", "Check dependencies later"):
+        assert icon_for_text(text) in (None, "dependencies-update"), text
+    assert icon_for_text("Copy") is None and icon_for_text("Close") is None
+
+
+def test_menus_buttons_and_toolbars_get_icons(qapp):
+    from conftest import pump
+    from PySide6.QtWidgets import QMenu, QPushButton, QToolBar, QVBoxLayout, QWidget
+
+    from termswitch.icons import install_icon_theme
+    install_icon_theme(qapp)
+    install_icon_theme(qapp)                         # idempotent
+    w = QWidget()
+    lay = QVBoxLayout(w)
+    bar = QToolBar()
+    reload_action = bar.addAction("Reload")
+    lay.addWidget(bar)
+    run = QPushButton("Run")
+    plain = QPushButton("Close")
+    lay.addWidget(run)
+    lay.addWidget(plain)
+    w.show()
+    pump(qapp, 0.1)
+    assert not reload_action.icon().isNull()
+    assert not run.icon().isNull() and plain.icon().isNull()
+    menu = QMenu()
+    rename = menu.addAction("Rename...")
+    menu.show()
+    pump(qapp, 0.1)
+    assert not rename.icon().isNull()
+    undo = menu.addAction("Undo Rename profile a to b")
+    menu.aboutToShow.emit()                          # items added later are decorated too
+    assert not undo.icon().isNull()
+    menu.close()
+    w.close()
+
+
+def test_profile_kinds_have_icons():
+    from termswitch.icons import PROFILE_KIND_ICONS
+    from termswitch.ui import KIND_LABELS
+    assert set(KIND_LABELS) <= set(PROFILE_KIND_ICONS)
