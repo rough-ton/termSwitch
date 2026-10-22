@@ -35,4 +35,4 @@ python -m pytest -q
 python tools/check_attribution.py --commits --files
 ```
 
-Dependency changes go in the `.in` files; regenerate the locks as described in the README.
+Dependency changes go in the `.in` files; regenerate the locks as described in [docs/development.md](docs/development.md#dependency-locks).
