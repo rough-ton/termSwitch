@@ -1494,6 +1494,7 @@ class MainWindow(QMainWindow):
             icon=self.windowIcon() if not self.windowIcon().isNull()
             else QApplication.windowIcon(),
             parent=self)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dlg.exec()
 
     def show_licenses(self, start: str | None = None):

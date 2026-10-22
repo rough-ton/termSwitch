@@ -18,9 +18,18 @@ def _isolated_settings(tmp_path_factory):
 
 @pytest.fixture(scope="session")
 def qapp():
+    from PySide6.QtCore import QThreadPool
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])
     yield app
+    # Tear Qt down in order. Widgets that outlive the QApplication crash the
+    # interpreter at exit (seen as a segfault on Linux and exit code 1 on Windows).
+    QThreadPool.globalInstance().waitForDone(5000)
+    for widget in QApplication.topLevelWidgets():
+        widget.close()
+        widget.deleteLater()
+    app.processEvents()
+    app.sendPostedEvents(None, 0)
 
 
 def pump(app, seconds: float, until=None):
