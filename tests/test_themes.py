@@ -427,25 +427,26 @@ def test_palette_codes_use_the_scheme_colors():
 def test_powerline_arrows_fill_the_cell(qapp):
     """The solid arrow is drawn as a shape: its flat side fills the whole cell
     height, so it joins the segment before it with no seam."""
-    from PySide6.QtGui import QColor
+    from PySide6.QtGui import QColor, QImage
 
     from termswitch.terminal_widget import TerminalWidget
     t = TerminalWidget(["/bin/true"], {})
     t.set_scheme(ts.BUILTIN["Dracula"])
-    t.resize(300, 80)
     t.screen.resize(2, 20)
     # A red segment, then a red arrow on the default background.
-    t.stream.feed("\x1b[41m  \x1b[0;31m\x1b[0m")
-    t.show()
-    qapp.processEvents()
-    img = t.viewport().grab().toImage()
+    t.stream.feed("\x1b[41m  \x1b[0;31m\ue0b0\x1b[0m")
+    # Paint straight into an image. Showing and grabbing a top-level window
+    # crashed Python 3.12 on CI, and nothing here needs a window.
     cw, ch = t._cw, t._ch
+    t.viewport().resize(int(cw * 20) + 2, int(ch * 2) + 2)
+    img = QImage(t.viewport().size(), QImage.Format.Format_ARGB32)
+    img.fill(0)
+    t.viewport().render(img)
     red = QColor(ts.BUILTIN["Dracula"].ansi[1])
     bg = QColor(ts.BUILTIN["Dracula"].background)
-    scale = img.width() / t.viewport().width()
 
     def px(x, y):
-        return img.pixelColor(int(x * scale), int(y * scale))
+        return img.pixelColor(int(x), int(y))
 
     def near(a, b):
         return all(abs(x - y) <= 24 for x, y in zip(a.getRgb()[:3], b.getRgb()[:3]))
@@ -454,8 +455,27 @@ def test_powerline_arrows_fill_the_cell(qapp):
     for y in (ch / 4, ch / 3, ch / 2, ch * 2 / 3, ch * 3 / 4):
         for x in (x0 - 1, x0 - 0.5, x0, x0 + 0.5, x0 + 1):
             assert near(px(x, y), red), (x, y)
-    assert near(px(x0 + cw - 1, ch / 2), red)             # the point
+    # Inside the point, well clear of its anti-aliased edge (cells are as narrow as
+    # 8 to 13 pixels depending on the platform's font).
+    assert near(px(x0 + cw * 0.6, ch / 2), red)
     assert near(px(x0 + cw - 1, 1), bg)                   # outside the arrow
     assert near(px(x0 + cw - 1, ch - 1.5), bg)
-    t.close()
     t.deleteLater()
+
+
+def test_theme_change_skips_widgets_being_deleted(qapp, monkeypatch):
+    """Switching themes right after a tab closes must not touch deleted widgets."""
+    from PySide6.QtWidgets import QApplication, QLabel
+
+    alive = QLabel("x")
+    theme.set_role(alive, "hint")
+    doomed = QLabel("y")
+
+    class Gone:
+        def property(self, name):
+            raise RuntimeError("Internal C++ object already deleted.")
+    monkeypatch.setattr(QApplication, "allWidgets", staticmethod(lambda: [Gone(), doomed, alive]))
+    theme._recolor_roles()                      # no error
+    assert alive.palette().color(alive.foregroundRole()).name() == theme.colors().hint
+    alive.deleteLater()
+    doomed.deleteLater()
