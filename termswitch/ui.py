@@ -797,8 +797,6 @@ class MainWindow(QMainWindow):
         self._watch()
         self.rebuild()
         self._update_left_view()
-        self.statusBar().showMessage(
-            f"{len(self.store.profiles)} profiles from {self.store.config_file}", 5000)
 
     def _watch(self):
         paths = [str(self.store.config_file), str(self.store.config_file.parent),
