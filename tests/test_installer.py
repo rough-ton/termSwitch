@@ -120,3 +120,34 @@ def test_release_builds_and_smoke_tests_the_installer():
     build_ps = (WIN / "build_installer.ps1").read_text(encoding="utf-8")
     assert "termSwitch-windows-x64-portable.zip" in build_ps
     assert '"/DAppVersion=$Version"' in build_ps
+
+
+def bmp_size(path: Path) -> tuple[int, int, int]:
+    head = path.read_bytes()[:30]
+    assert head[:2] == b"BM", path
+    return (int.from_bytes(head[18:22], "little"), abs(int.from_bytes(head[22:26], "little", signed=True)),
+            int.from_bytes(head[28:30], "little"))
+
+
+def test_wizard_shows_termswitch_images_not_the_default_box():
+    import sys
+    sys.path.insert(0, str(ROOT / "tools"))
+    import make_installer_images as images
+    assert setup_value("WizardImageFile") == ",".join(f"images\\{f}" for f in images.wizard_files())
+    assert setup_value("WizardSmallImageFile") == ",".join(f"images\\{f}" for f in images.header_files())
+    for scale, wizard, header in zip(images.SCALES, images.wizard_files(), images.header_files()):
+        k = scale / 100
+        assert bmp_size(WIN / "images" / wizard) == (round(164 * k), round(314 * k), 24), wizard
+        side = round(55 * k)
+        assert bmp_size(WIN / "images" / header) == (side, side, 24), header
+
+
+def test_wizard_wording():
+    messages = re.search(r"^\[Messages\]\n(.*?)\n\n", ISS, re.M | re.S).group(1)
+    assert "WizardSelectTasks=Desktop shortcut" in messages
+    assert re.search(r"^SelectTasksDesc=$", messages, re.M)          # no "Which additional tasks"
+    assert "LicenseLabel3=You must accept the license to continue." in messages
+    texts = [line for line in messages.splitlines() if not line.startswith(";")]
+    assert not any("Please read" in line for line in texts)
+    assert 'Description: "Add a termSwitch shortcut to my desktop"' in ISS
+    assert "GroupDescription" not in ISS
