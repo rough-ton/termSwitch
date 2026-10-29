@@ -55,6 +55,10 @@ MinVersion=10.0.17763
 LicenseFile=..\..\LICENSE
 SetupIconFile=..\..\termswitch\assets\termswitch.ico
 WizardStyle=modern
+; termSwitch's icon instead of Inno Setup's box and disc. Drawn by
+; tools/make_installer_images.py at 100%, 150% and 200% display scaling.
+WizardImageFile=images\wizard-100.bmp,images\wizard-150.bmp,images\wizard-200.bmp
+WizardSmallImageFile=images\header-100.bmp,images\header-150.bmp,images\header-200.bmp
 UninstallDisplayName={#AppName}
 UninstallDisplayIcon={app}\{#AppExe}
 ; Close a running termSwitch before replacing its files (the wizard asks first).
@@ -66,7 +70,16 @@ OutputDir=..\..\dist
 OutputBaseFilename={#SetupName}
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "desktopicon"; Description: "Add a termSwitch shortcut to my desktop"; Flags: unchecked
+
+[Messages]
+; The license page said "Please read" twice; say it once.
+LicenseLabel=termSwitch is free, open source software under the MIT License.
+LicenseLabel3=You must accept the license to continue.
+; The only optional task is the desktop shortcut, so the page is named for it.
+WizardSelectTasks=Desktop shortcut
+SelectTasksDesc=
+SelectTasksLabel2=termSwitch is added to the Start menu. You can also put a shortcut on your desktop.
 
 [InstallDelete]
 ; An upgrade replaces the bundled libraries wholesale, so nothing stale is left behind.

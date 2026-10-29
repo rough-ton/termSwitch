@@ -88,6 +88,14 @@ Silent install and uninstall, for scripted setups:
 & "$env:LOCALAPPDATA\Programs\termSwitch\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES
 ```
 
+The wizard's images (the tall panel on the first and last pages, and the small icon at
+the top right of the others) are drawn from the app icon. After changing the icon,
+redraw them:
+
+```bash
+python tools/make_installer_images.py
+```
+
 Never change `AppId` in the script: Windows uses it to find the installed copy for
 upgrades and uninstalling. The release workflow pins the Inno Setup version
 (`INNO_SETUP_VERSION`); raise it on purpose.
