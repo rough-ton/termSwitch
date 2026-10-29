@@ -2,12 +2,15 @@
 #
 #   pyinstaller termswitch.spec
 #
-# Windows: dist/termSwitch.exe   (one self-contained file)
+# Windows: dist/termSwitch/termSwitch.exe   (one folder; packaging/windows turns it
+#          into the installer and the portable .zip)
 # macOS:   dist/termSwitch.app   (the release workflow packs it into one .dmg)
 # Linux:   dist/termSwitch       (one self-contained file)
 #
 # macOS apps have to be bundles, and PyInstaller no longer supports one-file .app
-# builds, so on macOS the single download is a .dmg holding the .app.
+# builds, so on macOS the single download is a .dmg holding the .app. On Windows a
+# folder starts faster than one file (nothing is unpacked to TEMP at each launch) and
+# is what the installer ships.
 import os
 import sys
 
@@ -131,6 +134,19 @@ if is_mac:
                 "termSwitch opens Terminal or iTerm2 windows set to the AWS profile you choose.",
         },
     )
+elif is_win:
+    # One folder: termSwitch.exe plus its libraries in _internal.
+    exe = EXE(
+        pyz, a.scripts, [],
+        exclude_binaries=True,
+        name=NAME,
+        console=False,
+        icon=icon,
+        version=version_file,
+        upx=False,          # UPX-packed binaries are often flagged by antivirus
+        strip=False,
+    )
+    coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name=NAME)
 else:
     # One file: everything is packed into the executable.
     exe = EXE(

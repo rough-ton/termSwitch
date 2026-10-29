@@ -6,9 +6,13 @@ name: Release
 #   is stamped into the app.
 # - Run it by hand (Actions > Release > Run workflow): build the downloads as
 #   run artifacts only, without publishing anything.
+# - Windows: an installer (termSwitch-windows-x64-setup.exe, Inno Setup) and a
+#   portable .zip, both built from PyInstaller's one-folder build, and smoke
+#   tested by installing, upgrading and uninstalling silently.
 # - Windows signing: when the SIGNPATH_ORGANIZATION_ID repository variable is
-#   set, the Windows build is signed for free by SignPath Foundation, verified
-#   on Windows, and only then published. A signing failure stops the release.
+#   set, SignPath Foundation signs termSwitch.exe, then the installer built
+#   around it (two signing requests to approve). Both are verified on Windows
+#   before anything is published. A signing failure stops the release.
 #   Unset, releases are unsigned as before. Setup: docs/releasing.md.
 on:
   push:
@@ -17,6 +21,9 @@ on:
 
 permissions:
   contents: read
+
+env:
+  INNO_SETUP_VERSION: "6.7.1"     # Chocolatey package "innosetup"; bump on purpose
 
 # Releases from main run one at a time, so two quick merges never pick the
 # same version. They are queued, not cancelled.
@@ -51,16 +58,18 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact: termSwitch-windows-x64.exe
+            artifact: termSwitch-windows-x64
+            files: dist/termSwitch-windows-x64-*
           - os: macos-latest
             artifact: termSwitch-macos-arm64.dmg
+            files: dist/termSwitch-macos-arm64.dmg
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
       id-token: write        # build provenance attestation
       attestations: write
     env:
-      # The Windows build goes to SignPath first; see the sign-windows job.
+      # The Windows build goes to SignPath first; see the sign-windows-app job.
       SIGN_WINDOWS: ${{ matrix.os == 'windows-latest' && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.SIGNPATH_ORGANIZATION_ID != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -86,17 +95,25 @@ jobs:
       - name: Build
         run: pyinstaller --noconfirm --clean termswitch.spec
 
-      - name: Package and smoke test (Windows)
+      - name: Install Inno Setup (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $out = "dist/${{ matrix.artifact }}"
-          Move-Item dist/termSwitch.exe $out
-          $p = Start-Process -FilePath $out -ArgumentList '--version' -Wait -PassThru -NoNewWindow
+          choco install innosetup --version "$env:INNO_SETUP_VERSION" --allow-downgrade --no-progress -y
+          if ($LASTEXITCODE -ne 0) { throw "Installing Inno Setup failed" }
+
+      - name: Package and smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          $p = Start-Process -FilePath dist/termSwitch/termSwitch.exe -ArgumentList '--version' -Wait -PassThru -NoNewWindow
           if ($p.ExitCode -ne 0) { throw "termSwitch --version exited $($p.ExitCode)" }
-          # Informational: the runner has no AWS config, so warnings are expected.
-          Start-Process -FilePath $out -ArgumentList '--check','--offline' -Wait -NoNewWindow
-          Get-Item $out | Select-Object Name, Length
+          # With signing on, this checks the installer before asking for approval;
+          # package-windows builds the published one around the signed exe.
+          ./packaging/windows/build_installer.ps1 -Version $env:VERSION -InnoVersion $env:INNO_SETUP_VERSION
+          ./packaging/windows/test_installer.ps1 -Setup dist/termSwitch-windows-x64-setup.exe -Version $env:VERSION
 
       - name: Package and smoke test (macOS)
         if: runner.os == 'macOS'
@@ -125,21 +142,43 @@ jobs:
         if: ${{ !github.event.repository.private && env.SIGN_WINDOWS != 'true' }}
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: dist/${{ matrix.artifact }}
+          subject-path: ${{ matrix.files }}
 
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - name: Upload the downloads
+        if: env.SIGN_WINDOWS != 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          # "unsigned-..." never reaches the release; publish only takes termSwitch-*.
-          name: ${{ env.SIGN_WINDOWS == 'true' && format('unsigned-{0}', matrix.artifact) || matrix.artifact }}
-          path: dist/${{ matrix.artifact }}
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.files }}
           if-no-files-found: error
           retention-days: 14
 
-  sign-windows:
+      # With signing on, the Windows build goes on as staging artifacts. Their names
+      # don't start with termSwitch-, so publish never takes them.
+      - name: Upload termSwitch.exe for signing
+        if: env.SIGN_WINDOWS == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unsigned-windows-exe
+          path: dist/termSwitch/termSwitch.exe
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload the app folder
+        if: env.SIGN_WINDOWS == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-app-folder
+          path: dist/termSwitch/
+          if-no-files-found: error
+          retention-days: 3
+
+  sign-windows-app:
     # Free code signing for open source projects: SignPath.io, certificate by
-    # SignPath Foundation. Every job before the signing request runs on
-    # GitHub-hosted runners, as SignPath requires. The request waits for a
+    # SignPath Foundation. Every job before a signing request runs on
+    # GitHub-hosted runners, as SignPath requires. Each request waits for a
     # manual approval in SignPath, so it waits here on Linux, the cheapest runner.
+    # First request: termSwitch.exe, so the installed program is signed.
     needs: [version, build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.SIGNPATH_ORGANIZATION_ID != ''
     runs-on: ubuntu-latest
@@ -148,14 +187,14 @@ jobs:
       actions: read          # find and fetch the unsigned build
       contents: read
     steps:
-      - name: Find the unsigned Windows build
+      - name: Find the unsigned termSwitch.exe
         id: unsigned
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           id=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
-                 --jq '.artifacts[] | select(.name == "unsigned-termSwitch-windows-x64.exe") | .id')
-          if [ -z "$id" ]; then echo "::error::The unsigned Windows build was not found"; exit 1; fi
+                 --jq '.artifacts[] | select(.name == "unsigned-windows-exe") | .id')
+          if [ -z "$id" ]; then echo "::error::The unsigned termSwitch.exe was not found"; exit 1; fi
           echo "id=$id" >> "$GITHUB_OUTPUT"
 
       - name: Sign with SignPath (waits for approval)
@@ -165,6 +204,7 @@ jobs:
           organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
           project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'termSwitch' }}
           signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: windows-app
           github-artifact-id: ${{ steps.unsigned.outputs.id }}
           wait-for-completion: true
           wait-for-completion-timeout-in-seconds: 3600
@@ -172,49 +212,151 @@ jobs:
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: signed-termSwitch-windows-x64.exe
-          path: signed/termSwitch-windows-x64.exe
+          name: signed-windows-exe
+          path: signed/termSwitch.exe
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 3
+
+  package-windows:
+    # Build the installer and portable .zip around the signed termSwitch.exe.
+    needs: [version, sign-windows-app]
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-app-folder
+          path: dist/termSwitch
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signed-windows-exe
+          path: signed
+
+      - name: Check the signed termSwitch.exe and put it in the app folder
+        shell: pwsh
+        run: |
+          ./packaging/windows/check_signature.ps1 signed/termSwitch.exe
+          Copy-Item signed/termSwitch.exe dist/termSwitch/termSwitch.exe -Force
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --version "$env:INNO_SETUP_VERSION" --allow-downgrade --no-progress -y
+          if ($LASTEXITCODE -ne 0) { throw "Installing Inno Setup failed" }
+
+      - name: Build and smoke test the installer
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          ./packaging/windows/build_installer.ps1 -Version $env:VERSION -InnoVersion $env:INNO_SETUP_VERSION
+          ./packaging/windows/test_installer.ps1 -Setup dist/termSwitch-windows-x64-setup.exe -Version $env:VERSION -RequireSignature
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unsigned-windows-setup
+          path: dist/termSwitch-windows-x64-setup.exe
+          if-no-files-found: error
+          retention-days: 3
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-portable
+          path: dist/termSwitch-windows-x64-portable.zip
+          if-no-files-found: error
+          retention-days: 3
+
+  sign-windows-setup:
+    # Second request: the installer itself.
+    needs: [version, package-windows]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.SIGNPATH_ORGANIZATION_ID != ''
+    runs-on: ubuntu-latest
+    environment: release     # holds SIGNPATH_API_TOKEN; limited to main
+    permissions:
+      actions: read          # find and fetch the unsigned installer
+      contents: read
+    steps:
+      - name: Find the unsigned installer
+        id: unsigned
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+                 --jq '.artifacts[] | select(.name == "unsigned-windows-setup") | .id')
+          if [ -z "$id" ]; then echo "::error::The unsigned installer was not found"; exit 1; fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      - name: Sign with SignPath (waits for approval)
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'termSwitch' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: windows-setup
+          github-artifact-id: ${{ steps.unsigned.outputs.id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signed-windows-setup
+          path: signed/termSwitch-windows-x64-setup.exe
+          if-no-files-found: error
+          retention-days: 3
 
   verify-windows:
-    # Check the signature on Windows before anything is published.
-    needs: [version, sign-windows]
+    # Check both signatures on Windows before anything is published.
+    needs: [version, package-windows, sign-windows-setup]
     runs-on: windows-latest
     permissions:
       contents: read
       id-token: write        # build provenance attestation
       attestations: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: signed-termSwitch-windows-x64.exe
+          name: signed-windows-setup
           path: dist
 
-      - name: Verify the signature and smoke test
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-portable
+          path: dist
+
+      - name: Verify the signatures and smoke test
         shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          $exe = "dist/termSwitch-windows-x64.exe"
-          $sig = Get-AuthenticodeSignature $exe
-          $sig | Format-List Status, StatusMessage, SignerCertificate, TimeStamperCertificate
-          if ($sig.Status -ne 'Valid') { throw "Signature is $($sig.Status): $($sig.StatusMessage)" }
-          if ($sig.SignerCertificate.Subject -notmatch 'SignPath Foundation') {
-            throw "Unexpected signer: $($sig.SignerCertificate.Subject)"
-          }
-          if (-not $sig.TimeStamperCertificate) { throw "The signature has no timestamp" }
-          $p = Start-Process -FilePath $exe -ArgumentList '--version' -Wait -PassThru -NoNewWindow
-          if ($p.ExitCode -ne 0) { throw "termSwitch --version exited $($p.ExitCode)" }
+          # The installer, and the program inside the portable .zip.
+          ./packaging/windows/check_signature.ps1 dist/termSwitch-windows-x64-setup.exe
+          Expand-Archive dist/termSwitch-windows-x64-portable.zip -DestinationPath "$env:RUNNER_TEMP/portable"
+          ./packaging/windows/check_signature.ps1 "$env:RUNNER_TEMP/portable/termSwitch/termSwitch.exe"
+          # Installs, then checks the installed termSwitch.exe is signed too.
+          ./packaging/windows/test_installer.ps1 -Setup dist/termSwitch-windows-x64-setup.exe -Version $env:VERSION -RequireSignature
 
       - name: Attest build provenance
         if: ${{ !github.event.repository.private }}
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: dist/termSwitch-windows-x64.exe
+          subject-path: dist/termSwitch-windows-x64-*
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: termSwitch-windows-x64.exe
-          path: dist/termSwitch-windows-x64.exe
+          name: termSwitch-windows-x64
+          path: dist/termSwitch-windows-x64-*
           if-no-files-found: error
           retention-days: 14
 
@@ -236,7 +378,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: out
-          pattern: termSwitch-*      # never the unsigned- or signed- staging copies
+          pattern: termSwitch-*      # never the staging artifacts for signing
           merge-multiple: true
 
       - name: Checksums

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration "windows-app": the termSwitch program itself.
+
+  Paste this into the SignPath project (Artifact configurations > New) with the slug
+  windows-app. The release workflow's first signing request sends a ZIP holding one
+  file, termSwitch.exe from the PyInstaller build. SignPath signs only that file, and
+  only when its metadata says it is termSwitch (the Windows version info in
+  termswitch.spec), so nothing else can be signed under this configuration.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="termSwitch.exe" max-matches="1"
+             product-name="termSwitch" original-filename="termSwitch.exe">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

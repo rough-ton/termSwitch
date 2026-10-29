@@ -9,8 +9,8 @@ macOS runners.
 builds pass their smoke tests, the workflow:
 
 - creates tag `vX.Y.Z` on the merged commit
-- publishes the release with the `.exe`, `.dmg` and `SHA256SUMS.txt`, plus notes listing
-  the merged PRs
+- publishes the release with the Windows installer and portable `.zip`, the macOS `.dmg`
+  and `SHA256SUMS.txt`, plus notes listing the merged PRs
 - marks it as the latest release
 - attests build provenance (public repos only)
 
@@ -43,11 +43,54 @@ python -m pip install --require-hashes -r requirements.lock -r requirements-buil
 pyinstaller --noconfirm --clean termswitch.spec
 ```
 
-This produces `dist/termSwitch.exe` on Windows and `dist/termSwitch.app` on macOS.
+This produces `dist/termSwitch/termSwitch.exe` (one folder) on Windows and
+`dist/termSwitch.app` on macOS.
 
-The `.spec` file builds one self-contained file on Windows. macOS apps must be bundles,
-and PyInstaller no longer supports one-file `.app` builds, so on macOS the single
-download is a `.dmg`.
+On Windows the folder becomes an installer and a portable `.zip`. On macOS, apps must be
+bundles and PyInstaller no longer supports one-file `.app` builds, so the single download
+is a `.dmg`.
+
+### The Windows installer
+
+`packaging/windows/termswitch.iss` is an [Inno Setup](https://jrsoftware.org/isinfo.php)
+script (free, open source). With Inno Setup 6 installed, after the PyInstaller build:
+
+```powershell
+pwsh packaging/windows/build_installer.ps1 -Version 0.7.0
+pwsh packaging/windows/test_installer.ps1 -Setup dist/termSwitch-windows-x64-setup.exe -Version 0.7.0
+```
+
+The first writes `dist/termSwitch-windows-x64-setup.exe` and
+`dist/termSwitch-windows-x64-portable.zip`. The second is the release workflow's smoke
+test: it installs silently for the current user, checks the version, shortcuts and that
+the app starts, installs again over it, uninstalls (settings kept), then installs and
+uninstalls with `/REMOVEUSERDATA` (settings removed, `~/.aws` untouched). It installs into
+your own profile, so run it on a test machine or a runner.
+
+What the installer does:
+
+- Installs for the current user by default, in `%LOCALAPPDATA%\Programs\termSwitch`
+  with no admin rights. The first page offers "all users" (Program Files, needs admin).
+- Adds a Start menu shortcut; a desktop shortcut is offered, unchecked. "Launch
+  termSwitch" at the end is unchecked.
+- A newer version installs over the old one in place and keeps settings. If termSwitch is
+  running, the installer offers to close it first.
+- Uninstalling removes the program. It asks whether to remove your termSwitch settings
+  too (default No); Yes runs `termSwitch.exe --remove-user-data`, which deletes the
+  settings, saved SSH sessions, their saved passwords in Credential Manager and the
+  caches. `~/.aws`, `~/.ssh` and the config backups next to `~/.aws/config` are never
+  touched. Silent uninstall keeps settings unless `/REMOVEUSERDATA` is passed.
+
+Silent install and uninstall, for scripted setups:
+
+```powershell
+.\termSwitch-windows-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /CURRENTUSER
+& "$env:LOCALAPPDATA\Programs\termSwitch\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES
+```
+
+Never change `AppId` in the script: Windows uses it to find the installed copy for
+upgrades and uninstalling. The release workflow pins the Inno Setup version
+(`INNO_SETUP_VERSION`); raise it on purpose.
 
 ### The macOS install window
 
@@ -96,14 +139,28 @@ are published unsigned, as before.
 
 ### How a signed release runs
 
-1. `build` makes both downloads on GitHub-hosted runners. The Windows file is uploaded
-   as `unsigned-termSwitch-windows-x64.exe`, which never reaches the release.
-2. `sign-windows` (Linux runner, `release` environment) sends it to SignPath and waits
-   up to an hour for you to approve the request in SignPath.
-3. `verify-windows` checks the signature on Windows: valid, signed by SignPath
-   Foundation, timestamped, and the app still starts. It then attests the signed file.
-4. `publish` runs only if that check passed, computes `SHA256SUMS.txt` from the signed
-   file, and names the signer in the release notes.
+Windows signing takes **two approvals** in SignPath per release: the program, then the
+installer built around it, so both the installer and the installed `termSwitch.exe` are
+signed.
+
+1. `build` makes both platforms' downloads on GitHub-hosted runners and smoke tests the
+   (unsigned) installer. The Windows build is uploaded as staging artifacts
+   (`unsigned-windows-exe`, `windows-app-folder`) that never reach the release.
+2. `sign-windows-app` (Linux runner, `release` environment) sends `termSwitch.exe` to
+   SignPath (artifact configuration `windows-app`) and waits up to an hour for your
+   approval.
+3. `package-windows` checks that signature, puts the signed exe in the app folder, and
+   builds and smoke tests the installer and portable `.zip`.
+4. `sign-windows-setup` sends the installer to SignPath (artifact configuration
+   `windows-setup`) and waits for your second approval.
+5. `verify-windows` checks on Windows that the installer, the exe in the portable `.zip`
+   and the installed exe are all validly signed by SignPath Foundation and timestamped,
+   runs the install smoke test again, and attests both files.
+6. `publish` runs only if that check passed, computes `SHA256SUMS.txt` from the signed
+   files, and names the signer in the release notes.
+
+The uninstaller (`unins000.exe`), which Inno Setup writes at install time, is not
+signed.
 
 If signing or the check fails, nothing is published. Re-run the failed jobs once it's
 fixed.
@@ -133,9 +190,11 @@ follows the repo going public.
 4. **Set up the SignPath project** once approved:
    - Project slug `termSwitch`, linked to the predefined **GitHub.com** trusted build
      system.
-   - Artifact configuration: paste
-     [signing/signpath-artifact-configuration.xml](../signing/signpath-artifact-configuration.xml)
-     and make it the default.
+   - Two artifact configurations: paste
+     [signing/signpath-windows-app.xml](../signing/signpath-windows-app.xml) with the slug
+     `windows-app`, and
+     [signing/signpath-windows-setup.xml](../signing/signpath-windows-setup.xml) with the
+     slug `windows-setup`.
    - Signing policy slug `release-signing`, with manual approval.
    - A CI user with the submitter role, and an API token for it.
 
@@ -158,8 +217,8 @@ follows the repo going public.
    gh variable set SIGNPATH_POLICY_SLUG -R rough-ton/termSwitch --body '<policy slug>'
    ```
 
-6. **Release as usual.** Approve the signing request in SignPath when it arrives; the
-   workflow waits up to an hour.
+6. **Release as usual.** Approve the two signing requests in SignPath as they arrive
+   (the program, then the installer); the workflow waits up to an hour for each.
 
 7. **Update the docs:** remove "is applying" from the README's Code signing policy
    section and the status note in [code-signing-policy.md](code-signing-policy.md), and

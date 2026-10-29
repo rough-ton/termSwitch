@@ -11,7 +11,8 @@ Free code signing provided by [SignPath.io](https://about.signpath.io/), certifi
 
 | Download | Signed | By |
 | --- | --- | --- |
-| `termSwitch-windows-x64.exe` | Yes (Authenticode, timestamped) | SignPath Foundation |
+| `termSwitch-windows-x64-setup.exe` (the installer) | Yes (Authenticode, timestamped) | SignPath Foundation |
+| `termSwitch.exe`, inside the installer and `termSwitch-windows-x64-portable.zip` | Yes (Authenticode, timestamped) | SignPath Foundation |
 | `termSwitch-macos-arm64.dmg` | No: Apple only accepts its own paid Developer ID certificates | |
 
 Only release builds are signed:
@@ -22,7 +23,9 @@ Only release builds are signed:
 - SignPath verifies that the file came from that workflow run before signing it.
 - Each signing request is approved by hand in SignPath. The workflow then checks the
   signature on Windows and stops the release if it isn't valid.
-- The signed file is what's published, and `SHA256SUMS.txt` is computed from it.
+- The program and the installer are separate signing requests, each approved by hand.
+  The installer's uninstaller, which Inno Setup writes at install time, is not signed.
+- The signed files are what's published, and `SHA256SUMS.txt` is computed from them.
 
 The signature shows the publisher as **SignPath Foundation**. termSwitch's name and
 version are in the file's details (right-click > Properties > Details).
@@ -58,12 +61,12 @@ Manager.
 
 ```powershell
 # Windows: the signature (once signing is on)
-Get-AuthenticodeSignature .\termSwitch-windows-x64.exe | Format-List Status, SignerCertificate
+Get-AuthenticodeSignature .\termSwitch-windows-x64-setup.exe | Format-List Status, SignerCertificate
 ```
 
 ```bash
 # Any download: built by this repository's release workflow (once the repo is public)
-gh attestation verify termSwitch-windows-x64.exe -R rough-ton/termSwitch
+gh attestation verify termSwitch-windows-x64-setup.exe -R rough-ton/termSwitch
 gh attestation verify termSwitch-macos-arm64.dmg -R rough-ton/termSwitch
 
 # Any download: the checksum matches the release
