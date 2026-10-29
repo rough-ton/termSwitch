@@ -43,8 +43,13 @@ if ($InnoVersion -and -not "$found".StartsWith($InnoVersion)) {
 }
 
 $script = Join-Path $PSScriptRoot 'termswitch.iss'
-& $iscc "/DAppVersion=$Version" "/DAppDir=$app" "/O$out" $script
-if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+$compile = & $iscc "/DAppVersion=$Version" "/DAppDir=$app" "/O$out" $script 2>&1
+$compile | Out-Host
+if ($LASTEXITCODE -ne 0) {
+  # ISCC prints the failing line near the end; carry it into the error.
+  $why = ($compile | Where-Object { "$_".Trim() } | Select-Object -Last 4) -join ' | '
+  throw "ISCC failed with exit code ${LASTEXITCODE}: $why"
+}
 
 # The portable download: the same folder, unpacked anywhere and run in place.
 $zip = Join-Path $out 'termSwitch-windows-x64-portable.zip'

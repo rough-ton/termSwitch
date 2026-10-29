@@ -112,7 +112,12 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "termSwitch --version exited $($p.ExitCode)" }
           # With signing on, this checks the installer before asking for approval;
           # package-windows builds the published one around the signed exe.
-          ./packaging/windows/build_installer.ps1 -Version $env:VERSION -InnoVersion $env:INNO_SETUP_VERSION
+          try {
+            ./packaging/windows/build_installer.ps1 -Version $env:VERSION -InnoVersion $env:INNO_SETUP_VERSION
+          } catch {
+            Write-Host "::error title=Windows installer build::$($_.Exception.Message)"
+            throw
+          }
           ./packaging/windows/test_installer.ps1 -Setup dist/termSwitch-windows-x64-setup.exe -Version $env:VERSION
 
       - name: Package and smoke test (macOS)
@@ -255,7 +260,12 @@ jobs:
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          ./packaging/windows/build_installer.ps1 -Version $env:VERSION -InnoVersion $env:INNO_SETUP_VERSION
+          try {
+            ./packaging/windows/build_installer.ps1 -Version $env:VERSION -InnoVersion $env:INNO_SETUP_VERSION
+          } catch {
+            Write-Host "::error title=Windows installer build::$($_.Exception.Message)"
+            throw
+          }
           ./packaging/windows/test_installer.ps1 -Setup dist/termSwitch-windows-x64-setup.exe -Version $env:VERSION -RequireSignature
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

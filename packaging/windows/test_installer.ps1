@@ -35,12 +35,16 @@ New-Item -ItemType Directory -Force $Logs | Out-Null
 
 function Step($text) { Write-Host "`n== $text" }
 
+function Get-LogTail($log) {
+  if (Test-Path $log) { (Get-Content $log | Select-Object -Last 3) -join ' | ' } else { 'no log' }
+}
+
 function Install($name) {
   $log = Join-Path $Logs "$name.log"
   $p = Start-Process -FilePath $Setup -PassThru -Wait -ArgumentList @(
     '/VERYSILENT', '/SUPPRESSMSGBOXES', '/CURRENTUSER', '/NORESTART', "/LOG=`"$log`"")
-  if ($p.ExitCode -ne 0) { Get-Content $log | Out-Host; throw "Setup exited $($p.ExitCode)" }
-  if (-not (Test-Path $Exe)) { Get-Content $log | Out-Host; throw "$Exe was not installed" }
+  if ($p.ExitCode -ne 0) { Get-Content $log | Out-Host; throw "Setup exited $($p.ExitCode): $(Get-LogTail $log)" }
+  if (-not (Test-Path $Exe)) { Get-Content $log | Out-Host; throw "$Exe was not installed: $(Get-LogTail $log)" }
 }
 
 function Uninstall($name, [string[]]$extra = @()) {
@@ -101,6 +105,11 @@ try {
   Remove-Item $guard
 
   Step 'Installer smoke test passed'
+}
+catch {
+  # In GitHub Actions, show the reason on the run's summary page too.
+  if ($env:GITHUB_ACTIONS) { Write-Host "::error title=Installer smoke test::$($_.Exception.Message)" }
+  throw
 }
 finally {
   if (Test-Path $UninstallKey) {
