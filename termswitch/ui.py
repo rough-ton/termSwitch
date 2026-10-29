@@ -480,7 +480,7 @@ class SettingsDialog(QDialog):
         self.confirm_prod.setChecked(get_setting(s, "confirm_prod"))
         form.addRow("", self.confirm_prod)
 
-        # Other clouds: placeholders until they're supported (issue #22).
+        # Other clouds: placeholders until they're supported (issue #13).
         coming = []
         for name in CLOUD_PROVIDERS_COMING:
             box, form = self._group(name)

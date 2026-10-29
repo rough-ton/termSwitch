@@ -13,6 +13,11 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
 </p>
 
+> [!WARNING]
+> **Beta:** termSwitch is a work in progress and still in beta development. Expect rough
+> edges and changes between releases. Please
+> [report problems](https://github.com/rough-ton/termSwitch/issues/new) you run into.
+
 termSwitch is a desktop app for Windows and macOS that keeps your AWS profiles in a tree,
 grouped the way you work. Double-click a profile and a terminal tab opens inside the app,
 already set to that profile.
