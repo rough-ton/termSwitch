@@ -36,7 +36,26 @@ $iscc = @(
   (Get-Command ISCC.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
 ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 if (-not $iscc) { throw 'Inno Setup 6 (ISCC.exe) not found: https://jrsoftware.org/isdl.php' }
-$found = (Get-Item $iscc).VersionInfo.ProductVersion
+# ISCC.exe itself reports 0.0.0.0, so read the version from the compiler library or
+# Compil32.exe beside it, then from Inno Setup's entry in Apps.
+$found = $null
+foreach ($file in 'ISCmplr.dll', 'Compil32.exe', 'ISCC.exe') {
+  $path = Join-Path (Split-Path $iscc) $file
+  if (Test-Path $path) {
+    $v = (Get-Item $path).VersionInfo
+    foreach ($candidate in $v.ProductVersion, $v.FileVersion) {
+      if ("$candidate" -match '^\d+\.\d+\.\d+' -and "$candidate" -notmatch '^0\.0\.0') { $found = "$candidate"; break }
+    }
+  }
+  if ($found) { break }
+}
+if (-not $found) {
+  $found = Get-ItemProperty -ErrorAction SilentlyContinue -Path @(
+    'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1',
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1',
+    'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1'
+  ) | Select-Object -ExpandProperty DisplayVersion -First 1
+}
 Write-Host "Inno Setup: $iscc ($found)"
 if ($InnoVersion -and -not "$found".StartsWith($InnoVersion)) {
   throw "Inno Setup $InnoVersion is required, found $found"
