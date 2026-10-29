@@ -45,7 +45,7 @@ from .icons import (AUTO_GROUP_ICONS, PROVIDER_DOT_CORNER, PROVIDER_ICONS, decor
                     install_icon_theme, shell_icon)
 from .aws_params import is_destructive, needs_confirmation
 from .commands_pane import CommandsPane, VerticalTab
-from .home_view import AppStatusBar, HomeItem, HomeView
+from .home_view import AppStatusBar, BetaBadge, HomeItem, HomeView
 from .terminal_tabs import TerminalTabs
 from .terminal_widget import TerminalWidget, default_font
 from .status import CHECKING, ERROR, EXPIRED, UNKNOWN, VALID, StatusChecker, StatusResult
@@ -722,6 +722,7 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._build_actions()
+        self._add_beta_badge()
         # Menu bar menus can be native (macOS), so decorate them directly too.
         for menu_action in self.menuBar().actions():
             if menu_action.menu() is not None:
@@ -1033,6 +1034,16 @@ class MainWindow(QMainWindow):
         about.setMenuRole(QAction.MenuRole.AboutRole)
         menu_help.addAction(about)
 
+    def _add_beta_badge(self):
+        """The beta notice at the right end of the File / View / Profiles / Help row.
+        macOS shows the menu bar at the top of the screen, where an app can't add a
+        widget, so there it goes at the right end of the status bar instead."""
+        self.beta_badge = BetaBadge()
+        if self.menuBar().isNativeMenuBar():
+            self.statusBar().addPermanentWidget(self.beta_badge)
+        else:
+            self.menuBar().setCornerWidget(self.beta_badge, Qt.Corner.TopRightCorner)
+
     # ---- loading and tree building --------------------------------------
 
     def reload(self):
@@ -1114,6 +1125,7 @@ class MainWindow(QMainWindow):
     def _on_theme_changed(self, _effective: str):
         self._system_cache = None                # light and dark can differ
         self.statusBar().footer.refresh()
+        self.beta_badge.refresh()
         self.rebuild()
         self.terminals.apply_schemes(self.store.profiles)
         self.commands.model.layoutChanged.emit()
