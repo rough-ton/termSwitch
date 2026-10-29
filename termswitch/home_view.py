@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QCompleter, QFrame, QGridLayout, QHBoxLayout, QLa
 from . import __version__, theme
 from .icon import app_icon
 from .icons import shell_icon
-from .links import WEBSITE
+from .links import NEW_ISSUE_URL, WEBSITE
 
 RECENT_LIMIT = 9            # a 3 by 3 grid, like MobaXterm's recent sessions
 RECENT_COLUMNS = 3
@@ -246,6 +246,49 @@ class Footer(QLabel):
             f" &nbsp;·&nbsp; Please support termSwitch development:</span> "
             f"<a href='{html.escape(self.url, quote=True)}' "
             f"style='color:{c.link}'>{shown}</a>")
+
+
+BETA_TEXT = "Beta: work in progress"
+BETA_TIP = ("termSwitch is a work in progress and still in beta development. Expect rough "
+            "edges and changes between releases. Click to report a problem.")
+
+
+class BetaBadge(QWidget):
+    """A beta notice at the right end of the menu bar row: a small pill, then a link
+    to report a problem."""
+
+    def __init__(self, url: str = NEW_ISSUE_URL, parent=None):
+        super().__init__(parent)
+        self.url = url
+        self.setToolTip(BETA_TIP)
+        self.setAccessibleName(BETA_TEXT)
+        self.pill = QLabel(BETA_TEXT)
+        self.pill.setObjectName("betaPill")
+        self.link = QLabel()
+        self.link.setTextFormat(Qt.TextFormat.RichText)
+        self.link.setOpenExternalLinks(True)
+        self.link.setTextInteractionFlags(Qt.TextInteractionFlag.LinksAccessibleByMouse
+                                          | Qt.TextInteractionFlag.LinksAccessibleByKeyboard)
+        self.link.setToolTip(url)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 8, 0)
+        row.setSpacing(8)
+        row.addStretch(1)                       # keep it against the right edge
+        row.addWidget(self.pill, 0, Qt.AlignmentFlag.AlignVCenter)
+        row.addWidget(self.link, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.refresh()
+
+    def text(self) -> str:
+        return f"{self.pill.text()} {self.link.text()}"
+
+    def refresh(self) -> None:
+        """Re-render with the current theme's colors."""
+        c = theme.colors()
+        self.pill.setStyleSheet(
+            f"QLabel#betaPill {{ color: {c.warning}; border: 1px solid {c.warning}; "
+            "border-radius: 7px; padding: 0px 7px; font-weight: bold; }")
+        self.link.setText(f"<a href='{html.escape(self.url, quote=True)}' "
+                          f"style='color:{c.link}'>Report a problem</a>")
 
 
 class AppStatusBar(QStatusBar):

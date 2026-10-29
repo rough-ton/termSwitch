@@ -3,15 +3,15 @@
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMessageBox
 
 from termswitch import __version__
 from termswitch import ssh_sessions as ss
 from termswitch.config_store import ProfileStore
-from termswitch.home_view import AppStatusBar, Footer, HomeItem, HomeView
-from termswitch.links import WEBSITE
+from termswitch.home_view import BETA_TEXT, AppStatusBar, BetaBadge, Footer, HomeItem, HomeView
+from termswitch.links import NEW_ISSUE_URL, WEBSITE
 
 from conftest import pump
 from test_profile_ui import close_window
@@ -32,6 +32,13 @@ def test_footer_shows_name_version_and_support_link(qapp):
     assert "Please support termSwitch development" in text
     assert f"href='{WEBSITE}'" in text and "about.mroughton.com</a>" in text
     assert f.openExternalLinks()
+
+
+def test_beta_badge_says_beta_and_links_to_a_new_issue(qapp):
+    b = BetaBadge()
+    assert BETA_TEXT in b.text() and "Report a problem</a>" in b.text()
+    assert f"href='{NEW_ISSUE_URL}'" in b.link.text() and b.link.openExternalLinks()
+    assert "still in beta development" in b.toolTip()
 
 
 def test_messages_never_hide_the_footer(qapp):
@@ -270,3 +277,14 @@ def test_reopen_brings_back_local_tabs(window, qapp, tmp_path, monkeypatch):
         assert window.opened == ["aws:acme-dev-admin"]
     finally:
         window.terminals.close_all()
+
+
+def test_beta_badge_sits_at_the_right_of_the_menu_row(window):
+    bar = window.menuBar()
+    if bar.isNativeMenuBar():
+        assert window.beta_badge.parent() is window.statusBar()
+    else:
+        assert bar.cornerWidget(Qt.Corner.TopRightCorner) is window.beta_badge
+        assert [a.text() for a in bar.actions()] == ["&File", "&View", "&Profiles", "&Help"]
+    window._on_theme_changed("dark")
+    assert BETA_TEXT in window.beta_badge.text()

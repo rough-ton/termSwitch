@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration "windows-setup": the termSwitch installer.
+
+  Paste this into the SignPath project (Artifact configurations > New) with the slug
+  windows-setup. The release workflow's second signing request sends a ZIP holding one
+  file, termSwitch-windows-x64-setup.exe, built by Inno Setup around the already signed
+  termSwitch.exe. SignPath signs only that file, and only when its metadata says it is
+  termSwitch's installer (the VersionInfo lines in packaging/windows/termswitch.iss).
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="termSwitch-windows-x64-setup.exe" max-matches="1"
+             product-name="termSwitch" original-filename="termSwitch-windows-x64-setup.exe">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

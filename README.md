@@ -13,6 +13,11 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
 </p>
 
+> [!WARNING]
+> **Beta:** termSwitch is a work in progress and still in beta development. Expect rough
+> edges and changes between releases. Please
+> [report problems](https://github.com/rough-ton/termSwitch/issues/new) you run into.
+
 termSwitch is a desktop app for Windows and macOS that keeps your AWS profiles in a tree,
 grouped the way you work. Double-click a profile and a terminal tab opens inside the app,
 already set to that profile.
@@ -47,7 +52,7 @@ Get the latest build from the
 
 | Platform | File |
 | --- | --- |
-| Windows 10/11 (x64) | `termSwitch-windows-x64.exe`: a single file, no installer |
+| Windows 10/11 (x64) | `termSwitch-windows-x64-setup.exe`: the installer (no admin rights needed), or `termSwitch-windows-x64-portable.zip` to run without installing |
 | macOS 12+ (Apple Silicon) | `termSwitch-macos-arm64.dmg`: drag termSwitch to Applications |
 
 Each release includes `SHA256SUMS.txt` for verifying downloads. Code signing is on the
@@ -55,10 +60,14 @@ way for Windows (see [Code signing policy](#code-signing-policy)); until then, a
 macOS, the system warns the first time you open termSwitch.
 
 <details>
-<summary>Opening termSwitch the first time, and verifying a download</summary>
+<summary>Installing, opening termSwitch the first time, and verifying a download</summary>
 
-**Windows:** in the "Windows protected your PC" prompt, click **More info**, then
-**Run anyway**.
+**Windows:** run the installer. It installs for you only, in
+`%LOCALAPPDATA%\Programs\termSwitch`, or for all users if you choose that (needs admin
+rights). Installing a newer version upgrades in place and keeps your settings. Uninstall
+from **Settings > Apps**; it asks whether to remove your termSwitch settings too, and never
+touches `~/.aws` or `~/.ssh`. If a "Windows protected your PC" prompt appears, click
+**More info**, then **Run anyway**.
 
 **macOS 15 (Sequoia) and later:** open termSwitch once and close the warning. Then go to
 **System Settings > Privacy & Security**, scroll to Security, click **Open Anyway** next
@@ -79,7 +88,7 @@ xattr -dr com.apple.quarantine /Applications/termSwitch.app
 
 ```powershell
 # Windows
-(Get-FileHash .\termSwitch-windows-x64.exe -Algorithm SHA256).Hash
+(Get-FileHash .\termSwitch-windows-x64-setup.exe -Algorithm SHA256).Hash
 ```
 
 ```bash

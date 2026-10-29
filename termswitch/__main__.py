@@ -26,8 +26,24 @@ def main(argv: list[str] | None = None) -> int:
                         help="run the dependency check, print a report and exit (1 on errors)")
     parser.add_argument("--offline", action="store_true",
                         help="with --check, skip the latest-version lookups")
+    parser.add_argument("--remove-user-data", action="store_true",
+                        help="delete termSwitch's settings, saved SSH sessions and their "
+                             "saved passwords, and caches, then exit. ~/.aws and ~/.ssh "
+                             "are never touched. The Windows uninstaller uses this.")
     parser.add_argument("--version", action="version", version=f"termSwitch {__version__}")
     args, qt_args = parser.parse_known_args(argv)
+
+    if args.remove_user_data:
+        _attach_console()
+        from . import userdata
+        userdata.set_names()
+        try:
+            removed = userdata.remove()
+        except Exception as exc:
+            print(f"termSwitch: could not remove all user data: {exc}", file=sys.stderr)
+            return 1
+        print("Removed: " + ", ".join(removed) if removed else "Nothing to remove.")
+        return 0
 
     if args.check:
         _attach_console()
@@ -38,14 +54,15 @@ def main(argv: list[str] | None = None) -> int:
 
     from PySide6.QtWidgets import QApplication
 
+    from . import userdata
     from .icon import app_icon, set_windows_app_id
     from .ui import MainWindow
 
     set_windows_app_id()
     app = QApplication([sys.argv[0], *qt_args])
-    app.setApplicationName("termSwitch")
-    app.setApplicationDisplayName("termSwitch")
-    app.setOrganizationName("rough-ton")
+    app.setApplicationName(userdata.APPLICATION)
+    app.setApplicationDisplayName(userdata.APPLICATION)
+    app.setOrganizationName(userdata.ORGANIZATION)
     app.setApplicationVersion(__version__)
     app.setWindowIcon(app_icon())
     window = MainWindow()
